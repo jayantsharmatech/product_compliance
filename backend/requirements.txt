@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+pillow
+python-multipart
+python-dateutil
+dateparser
+google-genai
+fpdf2
