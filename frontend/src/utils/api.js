@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Directly target the EC2 backend to bypass Vercel's 10-second request timeout limit
-const API_BASE_URL = 'http://3.109.159.235';
+// Directly target your secure HTTPS EC2 backend domain
+const API_BASE_URL = 'https://3.109.159.235.nip.io';
 
 // Mock toggle - set to false when backend is ready
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
@@ -102,7 +102,7 @@ export const citizenHistory = async () => {
     return mockHistory;
   }
 
-  const response = await api.get('/api/public/history');
+  const response = await api.get('/history');
   return response.data;
 };
 
@@ -117,7 +117,7 @@ export const submitComplaint = async (complaintData) => {
     return { success: true, message: 'Complaint submitted successfully' };
   }
 
-  const response = await api.post('/api/public/complaints', complaintData);
+  const response = await api.post('/complaints', complaintData);
   return response.data;
 };
 
@@ -138,7 +138,7 @@ export const officerAudit = async (imageFile) => {
 
   const formData = new FormData();
   formData.append('file', imageFile);
-  const response = await api.post('/api/official/audit', formData, {
+  const response = await api.post('/scan', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
@@ -160,7 +160,7 @@ export const officerHistory = async (filters = {}) => {
     ];
   }
 
-  const response = await api.get('/api/official/history', { params: filters });
+  const response = await api.get('/history', { params: filters });
   return response.data;
 };
 
@@ -175,7 +175,7 @@ export const generateChallan = async (auditId) => {
     return new Blob(['Mock PDF content'], { type: 'application/pdf' });
   }
 
-  const response = await api.post(`/api/official/challan/${auditId}`, {}, { responseType: 'blob' });
+  const response = await api.get(`/report/${auditId}`, { responseType: 'blob' });
   return response.data;
 };
 
