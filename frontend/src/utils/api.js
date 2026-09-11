@@ -85,10 +85,9 @@ export const citizenScan = async (imageFile) => {
     return mockCitizenScan;
   }
 
-  // TODO (for backend team): Replace this with actual API call
   const formData = new FormData();
   formData.append('image', imageFile);
-  const response = await api.post('/api/public/scan', formData, {
+  const response = await api.post('/scan', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
@@ -104,7 +103,6 @@ export const citizenHistory = async () => {
     return mockHistory;
   }
 
-  // TODO (for backend team)
   const response = await api.get('/api/public/history');
   return response.data;
 };
@@ -120,7 +118,6 @@ export const submitComplaint = async (complaintData) => {
     return { success: true, message: 'Complaint submitted successfully' };
   }
 
-  // TODO (for backend team)
   const response = await api.post('/api/public/complaints', complaintData);
   return response.data;
 };
@@ -140,7 +137,6 @@ export const officerAudit = async (imageFile) => {
     return mockOfficerAudit;
   }
 
-  // TODO (for backend team)
   const formData = new FormData();
   formData.append('image', imageFile);
   const response = await api.post('/api/official/audit', formData, {
@@ -165,7 +161,6 @@ export const officerHistory = async (filters = {}) => {
     ];
   }
 
-  // TODO (for backend team)
   const response = await api.get('/api/official/history', { params: filters });
   return response.data;
 };
@@ -181,7 +176,6 @@ export const generateChallan = async (auditId) => {
     return new Blob(['Mock PDF content'], { type: 'application/pdf' });
   }
 
-  // TODO (for backend team)
   const response = await api.post(`/api/official/challan/${auditId}`, {}, { responseType: 'blob' });
   return response.data;
 };
