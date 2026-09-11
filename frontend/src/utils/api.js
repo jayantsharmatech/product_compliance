@@ -85,96 +85,63 @@ export const citizenScan = async (imageFile) => {
   }
 
   const formData = new FormData();
-  formData.append('image', imageFile);
+  // Must match FastAPI backend parameter name: file: UploadFile = File(...)
+  formData.append('file', imageFile);
+  
   const response = await api.post('/scan', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
 };
 
-/**
- * Get citizen's scan history
- * @returns {Promise<Array>} list of past scans
- */
 export const citizenHistory = async () => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 800));
     return mockHistory;
   }
-
-  const response = xmlnsGet('/api/public/history');
+  const response = await api.get('/api/public/history');
   return response.data;
 };
 
-/**
- * Submit a complaint
- * @param {Object} complaintData - { scan_id, description, location }
- * @returns {Promise<Object>} confirmation
- */
 export const submitComplaint = async (complaintData) => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 800));
     return { success: true, message: 'Complaint submitted successfully' };
   }
-
   const response = await api.post('/api/public/complaints', complaintData);
   return response.data;
 };
 
-// ------------------------------------------------------------------
-// Official (Inspector) Endpoints
-// ------------------------------------------------------------------
-
-/**
- * Run an official audit on an image
- * @param {File|Blob} imageFile
- * @returns {Promise<Object>} audit result
- */
 export const officerAudit = async (imageFile) => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     return mockOfficerAudit;
   }
-
   const formData = new FormData();
-  formData.append('image', imageFile);
+  formData.append('file', imageFile);
   const response = await api.post('/api/official/audit', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
 };
 
-/**
- * Get official audit history (filterable)
- * @param {Object} filters - { brand, compliance, location }
- * @returns {Promise<Array>} list of audits
- */
 export const officerHistory = async (filters = {}) => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 800));
     return [
       { id: 1, product: 'Biscuit Pack', brand: 'Britannia', compliance: 'VIOLATION', location: 'Mumbai', date: '2026-09-01' },
       { id: 2, product: 'Juice Bottle', brand: 'Real', compliance: 'PASS', location: 'Delhi', date: '2026-08-31' },
-      { id: 3, product: 'Chips Packet', brand: "Lay's", compliance: 'WARNING', location: 'Chennai', date: '2026-08-30' },
-      { id: 4, product: 'Chocolate Bar', brand: 'Cadbury', compliance: 'PASS', location: 'Kolkata', date: '2026-08-29' },
     ];
   }
-
   const response = await api.get('/api/official/history', { params: filters });
   return response.data;
 };
 
-/**
- * Generate challan PDF for a specific audit
- * @param {string} auditId
- * @returns {Promise<Blob>} PDF blob
- */
 export const generateChallan = async (auditId) => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     return new Blob(['Mock PDF content'], { type: 'application/pdf' });
   }
-
   const response = await api.post(`/api/official/challan/${auditId}`, {}, { responseType: 'blob' });
   return response.data;
 };
