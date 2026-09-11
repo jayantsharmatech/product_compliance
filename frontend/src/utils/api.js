@@ -74,7 +74,7 @@ api.interceptors.request.use((config) => {
 // ------------------------------------------------------------------
 
 /**
- * Upload a product image and get compliance result
+ * Upload a single product image and get compliance result
  * @param {File|Blob} imageFile
  * @returns {Promise<Object>} compliance result
  */
@@ -87,6 +87,28 @@ export const citizenScan = async (imageFile) => {
   const formData = new FormData();
   formData.append('file', imageFile);
   const response = await api.post('/scan', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
+/**
+ * Upload multiple product images for comprehensive extraction
+ * @param {Array<File|Blob>} imageFiles
+ * @returns {Promise<Object>} compliance result
+ */
+export const scanMultipleImages = async (imageFiles) => {
+  if (USE_MOCK) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return mockCitizenScan;
+  }
+
+  const formData = new FormData();
+  imageFiles.forEach((file) => {
+    formData.append('files', file);
+  });
+
+  const response = await api.post('/scan-multiple', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
@@ -126,22 +148,30 @@ export const submitComplaint = async (complaintData) => {
 // ------------------------------------------------------------------
 
 /**
- * Run an official audit on an image
- * @param {File|Blob} imageFile
+ * Run an official audit on single or multiple images
+ * @param {File|Blob|Array<File|Blob>} imageFileOrFiles
  * @returns {Promise<Object>} audit result
  */
-export const officerAudit = async (imageFile) => {
+export const officerAudit = async (imageFileOrFiles) => {
   if (USE_MOCK) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     return mockOfficerAudit;
   }
 
   const formData = new FormData();
-  formData.append('file', imageFile);
-  const response = await api.post('/scan', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
-  return response.data;
+  if (Array.isArray(imageFileOrFiles)) {
+    imageFileOrFiles.forEach((file) => formData.append('files', file));
+    const response = await api.post('/scan-multiple', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  } else {
+    formData.append('file', imageFileOrFiles);
+    const response = await api.post('/scan', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  }
 };
 
 /**

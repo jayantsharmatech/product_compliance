@@ -16,13 +16,16 @@ import {
   X,
   ChevronLeft,
   Info,
+  Layers,
 } from 'lucide-react';
-import { citizenScan, submitComplaint } from '../utils/api';
+import { citizenScan, scanMultipleImages, submitComplaint } from '../utils/api';
 
 export default function CitizenScanner() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
-  const [image, setImage] = useState(null);
+  const multiFileInputRef = useRef(null);
+  
+  const [images, setImages] = useState([]); // Supports multiple image previews
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -46,31 +49,39 @@ export default function CitizenScanner() {
     };
   }, []);
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  // Handle single or multiple file uploads
+  const handleFilesSelected = async (event, isMultiple = false) => {
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      setImage(e.target.result);
-      setIsScanning(true);
-      setError(null);
+    setIsScanning(true);
+    setError(null);
 
-      try {
-        const blob = await (await fetch(e.target.result)).blob();
-        const result = await citizenScan(blob);
-        setScanResult(result);
-      } catch (err) {
-        setError('Backend not connected. Using mock data for demo.');
-      } finally {
-        setIsScanning(false);
+    try {
+      // Read all files for preview
+      const previewPromises = files.map((file) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(file);
+        });
+      });
+
+      const previews = await Promise.all(previewPromises);
+      setImages(previews);
+
+      let result;
+      if (files.length > 1 || isMultiple) {
+        result = await scanMultipleImages(files);
+      } else {
+        result = await citizenScan(files[0]);
       }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleCapture = () => {
-    fileInputRef.current?.click();
+      setScanResult(result);
+    } catch (err) {
+      setError('Backend not connected or failed to parse. Using fallback display.');
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   const getLocation = () => {
@@ -94,7 +105,7 @@ export default function CitizenScanner() {
   const handleSubmitComplaint = async () => {
     try {
       await submitComplaint({
-        scan_id: scanResult?.id || 'scan_001',
+        scan_id: scanResult?.id || scanResult?.scan_id || 'scan_001',
         description: 'Violation reported from citizen scan',
         location: location,
       });
@@ -105,15 +116,20 @@ export default function CitizenScanner() {
     }
   };
 
-  const FieldStatus = ({ status }) => {
-    const styles = {
-      valid: 'bg-green-100 text-green-700',
-      warning: 'bg-yellow-100 text-yellow-700',
-      missing: 'bg-red-100 text-red-700',
-    };
+  // Robust Field Status check to avoid false "X" marks on valid values
+  const FieldStatus = ({ fieldData }) => {
+    const value = fieldData?.value;
+    const status = fieldData?.status;
+
+    const isAvailable = value && value !== 'Not found' && value !== null && status !== 'missing';
+
     return (
-      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${styles[status]}`}>
-        {status === 'valid' ? '✓' : status === 'warning' ? '⚠' : '✗'}
+      <span
+        className={`px-2 py-1 rounded-full text-xs font-semibold ${
+          isAvailable ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+        }`}
+      >
+        {isAvailable ? '✓ Found' : '✗ Missing'}
       </span>
     );
   };
@@ -140,15 +156,11 @@ export default function CitizenScanner() {
             {/* Dynamic Online/Offline Indicator */}
             <div
               className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${
-                isOnline
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-amber-100 text-amber-700'
+                isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               }`}
             >
               <span
-                className={`w-2 h-2 rounded-full ${
-                  isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                }`}
+                className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}
               ></span>
               {isOnline ? 'Online - Live Sync' : 'Offline - Local Queue Active'}
             </div>
@@ -161,67 +173,77 @@ export default function CitizenScanner() {
         <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200 mb-8">
           <div className="flex items-center gap-3 mb-4">
             <ScanLine className="w-6 h-6 text-emerald-600" />
-            <h2 className="text-lg font-semibold text-slate-900">Scan Product Label</h2>
+            <h2 className="text-lg font-semibold text-slate-900">Scan Product Label (Single or Multi-Angle)</h2>
           </div>
 
-          {!image ? (
-            <div className="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center hover:border-emerald-500 transition">
+          {images.length === 0 ? (
+            <div className="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:border-emerald-500 transition">
               <Camera className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-600 mb-2">Capture or upload package label image</p>
-              <p className="text-sm text-slate-400 mb-6">Ensure label is well-lit and text is readable</p>
-              <div className="flex justify-center gap-4">
-                <button
-                  onClick={handleCapture}
-                  className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-emerald-700 transition flex items-center gap-2"
-                >
-                  <Camera className="w-5 h-5" />
-                  Capture
-                </button>
+              <p className="text-slate-600 mb-2">Capture or upload single or multiple package labels</p>
+              <p className="text-sm text-slate-400 mb-6">Upload front, back, or ingredient panels for deep analysis</p>
+              <div className="flex flex-wrap justify-center gap-4">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="bg-white border-2 border-slate-300 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:border-emerald-500 hover:text-emerald-600 transition flex items-center gap-2"
+                  className="bg-emerald-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-emerald-700 transition flex items-center gap-2"
                 >
-                  <Upload className="w-5 h-5" />
-                  Upload
+                  <Camera className="w-5 h-5" />
+                  Capture / Single Upload
+                </button>
+                <button
+                  onClick={() => multiFileInputRef.current?.click()}
+                  className="bg-white border-2 border-emerald-600 text-emerald-700 px-5 py-3 rounded-xl font-semibold hover:bg-emerald-50 transition flex items-center gap-2"
+                >
+                  <Layers className="w-5 h-5" />
+                  Upload Multiple Images
                 </button>
               </div>
+              
+              {/* Single File Input */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 capture="environment"
-                onChange={handleFileUpload}
+                onChange={(e) => handleFilesSelected(e, false)}
+                className="hidden"
+              />
+              
+              {/* Multiple File Input */}
+              <input
+                ref={multiFileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(e) => handleFilesSelected(e, true)}
                 className="hidden"
               />
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="relative rounded-xl overflow-hidden">
-                <img src={image} alt="Product label" className="w-full h-72 object-cover" />
-                {isScanning && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                    <div className="text-center">
-                      <div className="animate-spin w-12 h-12 border-4 border-white border-t-transparent rounded-full mx-auto mb-3"></div>
-                      <p className="text-white font-semibold">Analyzing label...</p>
-                    </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {images.map((imgSrc, idx) => (
+                  <div key={idx} className="relative rounded-xl overflow-hidden border border-slate-200 h-36">
+                    <img src={imgSrc} alt={`Product label ${idx + 1}`} className="w-full h-full object-cover" />
                   </div>
-                )}
+                ))}
               </div>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleCapture}
-                  className="flex-1 bg-emerald-600 text-white py-2 rounded-lg font-semibold hover:bg-emerald-700 transition"
-                >
-                  Retake
-                </button>
+
+              {isScanning && (
+                <div className="bg-slate-900/80 rounded-xl p-6 text-center">
+                  <div className="animate-spin w-10 h-10 border-4 border-white border-t-transparent rounded-full mx-auto mb-3"></div>
+                  <p className="text-white font-semibold">Analyzing label images with OCR engine...</p>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => {
-                    setImage(null);
+                    setImages([]);
                     setScanResult(null);
                   }}
-                  className="flex-1 bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition"
+                  className="flex-1 bg-white border border-slate-300 py-2.5 rounded-lg font-semibold hover:bg-slate-50 transition"
                 >
-                  Cancel
+                  Clear & Scan Again
                 </button>
               </div>
             </div>
@@ -240,9 +262,9 @@ export default function CitizenScanner() {
           <div className="space-y-6">
             <div
               className={`bg-white rounded-2xl p-6 shadow-lg border ${
-                scanResult.compliance_score >= 80
+                (scanResult.compliance_score || 0) >= 80
                   ? 'border-green-200'
-                  : scanResult.compliance_score >= 50
+                  : (scanResult.compliance_score || 0) >= 50
                   ? 'border-yellow-200'
                   : 'border-red-200'
               }`}
@@ -250,21 +272,21 @@ export default function CitizenScanner() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h3 className="text-lg font-semibold text-slate-900">
-                    {scanResult.product_name || 'Unknown Product'}
+                    {scanResult.product_name || 'Scanned Commodity'}
                   </h3>
                   <p className="text-sm text-slate-500">Verification Result</p>
                 </div>
                 <div className="text-right">
                   <span
                     className={`text-4xl font-bold ${
-                      scanResult.compliance_score >= 80
+                      (scanResult.compliance_score || 0) >= 80
                         ? 'text-green-600'
-                        : scanResult.compliance_score >= 50
+                        : (scanResult.compliance_score || 0) >= 50
                         ? 'text-yellow-600'
                         : 'text-red-600'
                     }`}
                   >
-                    {scanResult.compliance_score}%
+                    {scanResult.compliance_score ?? 0}%
                   </span>
                   <p className="text-sm text-slate-500">Compliance</p>
                 </div>
@@ -275,66 +297,66 @@ export default function CitizenScanner() {
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Scale className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.mrp?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.mrp} />
                   </div>
                   <p className="text-xs text-slate-500">MRP</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.mrp?.value || 'Not found'}
+                    {scanResult.extracted_fields?.mrp?.value || scanResult.extracted_fields?.mrp || 'Not found'}
                   </p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Package className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.net_quantity?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.net_quantity} />
                   </div>
                   <p className="text-xs text-slate-500">Net Quantity</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.net_quantity?.value || 'Not found'}
+                    {scanResult.extracted_fields?.net_quantity?.value || scanResult.extracted_fields?.net_quantity || 'Not found'}
                   </p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Calendar className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.mfg_date?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.mfg_date} />
                   </div>
                   <p className="text-xs text-slate-500">Manufacturing Date</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.mfg_date?.value || 'Not found'}
+                    {scanResult.extracted_fields?.mfg_date?.value || scanResult.extracted_fields?.mfg_date || 'Not found'}
                   </p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Calendar className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.expiry_date?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.expiry_date} />
                   </div>
                   <p className="text-xs text-slate-500">Expiry Date</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.expiry_date?.value || 'Not found'}
+                    {scanResult.extracted_fields?.expiry_date?.value || scanResult.extracted_fields?.expiry_date || 'Not found'}
                   </p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Phone className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.consumer_care?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.consumer_care} />
                   </div>
                   <p className="text-xs text-slate-500">Consumer Care</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.consumer_care?.value || 'Not found'}
+                    {scanResult.extracted_fields?.consumer_care?.value || scanResult.extracted_fields?.consumer_care || 'Not found'}
                   </p>
                 </div>
 
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Building2 className="w-4 h-4 text-slate-500" />
-                    <FieldStatus status={scanResult.extracted_fields?.manufacturer?.status || 'missing'} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.manufacturer} />
                   </div>
                   <p className="text-xs text-slate-500">Manufacturer</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.manufacturer?.value || 'Not found'}
+                    {scanResult.extracted_fields?.manufacturer?.value || scanResult.extracted_fields?.manufacturer || 'Not found'}
                   </p>
                 </div>
               </div>
@@ -437,7 +459,7 @@ export default function CitizenScanner() {
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
                   rows="3"
                   placeholder="Describe the violation..."
-                  defaultValue="Missing consumer care details and incorrect date format on packaging"
+                  defaultValue="Missing mandatory package declarations identified during scan."
                 />
               </div>
 
@@ -475,7 +497,7 @@ export default function CitizenScanner() {
             <button
               onClick={() => {
                 setShowComplaintForm(false);
-                setImage(null);
+                setImages([]);
                 setScanResult(null);
               }}
               className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 transition"

@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   Camera,
   Upload,
-  Scale,
   Calendar,
   AlertTriangle,
   CheckCircle2,
@@ -18,6 +17,7 @@ import {
   TrendingUp,
   Users,
   LogOut,
+  Layers,
 } from 'lucide-react';
 import { officerAudit, officerHistory, generateChallan } from '../utils/api';
 import { officerLogout, getOfficer } from '../utils/auth';
@@ -25,7 +25,7 @@ import { officerLogout, getOfficer } from '../utils/auth';
 export default function OfficerDashboard() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('audit');
-  const [image, setImage] = useState(null);
+  const [images, setImages] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [showChallanModal, setShowChallanModal] = useState(false);
   const [auditResult, setAuditResult] = useState(null);
@@ -35,6 +35,7 @@ export default function OfficerDashboard() {
   const [error, setError] = useState(null);
 
   const fileInputRef = useRef(null);
+  const multiFileInputRef = useRef(null);
 
   // Officer session + online/offline detection
   const officer = getOfficer();
@@ -61,7 +62,7 @@ export default function OfficerDashboard() {
           search: searchTerm,
           compliance: complianceFilter,
         });
-        setHistory(data);
+        setHistory(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Failed to fetch history', err);
       }
@@ -69,36 +70,47 @@ export default function OfficerDashboard() {
     fetchHistory();
   }, [searchTerm, complianceFilter]);
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+  const handleFilesSelected = async (event, isMultiple = false) => {
+    const files = Array.from(event.target.files);
+    if (!files.length) return;
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      setImage(e.target.result);
-      setIsAnalyzing(true);
-      setError(null);
+    setIsAnalyzing(true);
+    setError(null);
 
-      try {
-        const blob = await (await fetch(e.target.result)).blob();
-        const result = await officerAudit(blob);
-        setAuditResult(result);
-      } catch (err) {
-        setError('Backend not connected. Using mock data for demo.');
-      } finally {
-        setIsAnalyzing(false);
+    try {
+      const previewPromises = files.map((file) => {
+        return new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (e) => resolve(e.target.result);
+          reader.readAsDataURL(file);
+        });
+      });
+
+      const previews = await Promise.all(previewPromises);
+      setImages(previews);
+
+      let result;
+      if (files.length > 1 || isMultiple) {
+        result = await officerAudit(files);
+      } else {
+        result = await officerAudit(files[0]);
       }
-    };
-    reader.readAsDataURL(file);
+      setAuditResult(result);
+    } catch (err) {
+      setError('Backend connection failed or parsing error. Check network.');
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleDownloadChallan = async () => {
     try {
-      const pdfBlob = await generateChallan(auditResult.id || 'audit_001');
+      const auditId = auditResult?.id || auditResult?.scan_id || 'audit_001';
+      const pdfBlob = await generateChallan(auditId);
       const url = window.URL.createObjectURL(pdfBlob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `challan_${auditResult.id || 'audit_001'}.pdf`;
+      a.download = `challan_${auditId}.pdf`;
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
@@ -107,10 +119,15 @@ export default function OfficerDashboard() {
   };
 
   const filteredHistory = history.filter((item) => {
+    const productName = item.product || item.product_name || '';
+    const brandName = item.brand || '';
+    const locationName = item.location || item.location_name || '';
+
     const matchesSearch =
-      item.product.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      item.location.toLowerCase().includes(searchTerm.toLowerCase());
+      productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      brandName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      locationName.toLowerCase().includes(searchTerm.toLowerCase());
+    
     const matchesFilter = complianceFilter === 'all' || item.compliance === complianceFilter;
     return matchesSearch && matchesFilter;
   });
@@ -135,33 +152,17 @@ export default function OfficerDashboard() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Dynamic Online/Offline Indicator */}
               <div
                 className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${
-                  isOnline
-                    ? 'bg-emerald-100 text-emerald-700'
-                    : 'bg-amber-100 text-amber-700'
+                  isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full ${
-                    isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'
-                  }`}
+                  className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}
                 ></span>
                 {isOnline ? 'Online - Live Sync' : 'Offline - Local Queue Active'}
               </div>
 
-              {/* Officer Info
-              <div className="hidden md:flex flex-col items-end pl-3 border-l border-slate-200">
-                <span className="text-xs font-semibold text-slate-900">
-                  {officer?.name || 'Officer'}
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  ID: {officer?.officerId || '—'}
-                </span>
-              </div> */}
-
-              {/* Logout */}
               <button
                 onClick={officerLogout}
                 className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition flex items-center gap-1"
@@ -206,47 +207,72 @@ export default function OfficerDashboard() {
             {/* Left Column – Image & Calibration */}
             <div className="space-y-6">
               <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
-                <h2 className="text-lg font-semibold text-slate-900 mb-4">Image Preview & Calibration</h2>
+                <h2 className="text-lg font-semibold text-slate-900 mb-4">Multi-Angle Image Preview & Calibration</h2>
 
-                {!image ? (
-                  <div className="border-2 border-dashed border-slate-300 rounded-xl p-12 text-center hover:border-blue-500 transition">
-                  <Camera className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                  <p className="text-slate-600 mb-2">Capture or upload package image</p>
-                  <p className="text-sm text-slate-400 mb-6">Ensure label is well-lit and text is readable</p>
-                  <div className="flex justify-center gap-4">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center gap-2"
-                    >
-                      <Camera className="w-5 h-5" />
-                      Capture
-                    </button>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="bg-white border-2 border-slate-300 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:border-blue-500 hover:text-blue-600 transition flex items-center gap-2"
-                    >
-                      <Upload className="w-5 h-5" />
-                      Upload
-                    </button>
+                {images.length === 0 ? (
+                  <div className="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:border-blue-500 transition">
+                    <Camera className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                    <p className="text-slate-600 mb-2">Capture or upload single or multi-angle package images</p>
+                    <p className="text-sm text-slate-400 mb-6">Ensure labels are clear and well-lit</p>
+                    <div className="flex flex-wrap justify-center gap-4">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-blue-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center gap-2"
+                      >
+                        <Camera className="w-5 h-5" />
+                        Capture / Single Upload
+                      </button>
+                      <button
+                        onClick={() => multiFileInputRef.current?.click()}
+                        className="bg-white border-2 border-blue-600 text-blue-700 px-5 py-3 rounded-xl font-semibold hover:bg-blue-50 transition flex items-center gap-2"
+                      >
+                        <Layers className="w-5 h-5" />
+                        Upload Multiple Images
+                      </button>
+                    </div>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => handleFilesSelected(e, false)}
+                      className="hidden"
+                    />
+
+                    <input
+                      ref={multiFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => handleFilesSelected(e, true)}
+                      className="hidden"
+                    />
                   </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
-                </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="relative rounded-xl overflow-hidden">
-                      <img src={image} alt="Audit image" className="w-full h-64 object-cover" />
-                      {isAnalyzing && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                          <div className="animate-spin w-12 h-12 border-4 border-white border-t-transparent rounded-full"></div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {images.map((imgSrc, idx) => (
+                        <div key={idx} className="relative rounded-xl overflow-hidden border border-slate-200 h-32">
+                          <img src={imgSrc} alt={`Audit view ${idx + 1}`} className="w-full h-full object-cover" />
                         </div>
-                      )}
+                      ))}
+                    </div>
+
+                    {isAnalyzing && (
+                      <div className="bg-slate-900/80 rounded-xl p-6 text-center">
+                        <div className="animate-spin w-10 h-10 border-4 border-white border-t-transparent rounded-full mx-auto mb-3"></div>
+                        <p className="text-white font-semibold">Running official legal audit inspection...</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setImages([])}
+                        className="w-full bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition"
+                      >
+                        Clear & Reset Audit Images
+                      </button>
                     </div>
                   </div>
                 )}
@@ -262,20 +288,24 @@ export default function OfficerDashboard() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Inspection Date (Today)</p>
-                      <p className="font-semibold text-slate-900">{auditResult.inspection_date || new Date().toISOString().split('T')[0]}</p>
+                      <p className="font-semibold text-slate-900">{new Date().toISOString().split('T')[0]}</p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Manufacturing Date</p>
-                      <p className="font-semibold text-slate-900">{auditResult.fields?.mfg_date?.value || 'Not found'}</p>
+                      <p className="font-semibold text-slate-900">
+                        {auditResult.extracted_fields?.mfg_date?.value || auditResult.fields?.mfg_date?.value || 'Not found'}
+                      </p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Expiry / Best Before</p>
-                      <p className="font-semibold text-slate-900">{auditResult.fields?.expiry_date?.value || 'Not found'}</p>
+                      <p className="font-semibold text-slate-900">
+                        {auditResult.extracted_fields?.expiry_date?.value || auditResult.fields?.expiry_date?.value || 'Not found'}
+                      </p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Status</p>
                       <p className="font-semibold text-slate-900">
-                        {auditResult.fields?.expiry_date?.value ? 'Valid' : 'Needs Check'}
+                        {auditResult.is_compliant ? 'Compliant' : 'Non-Compliant'}
                       </p>
                     </div>
                   </div>
@@ -291,17 +321,14 @@ export default function OfficerDashboard() {
                   </div>
                   <div className="space-y-3">
                     <div className="bg-slate-50 p-3 rounded-lg">
-                      <p className="text-xs text-slate-500 mb-1">English (Mandatory)</p>
-                      <p className="text-sm font-medium">Net Qty: 500g | MRP: ₹120</p>
+                      <p className="text-xs text-slate-500 mb-1">English Declaration</p>
+                      <p className="text-sm font-medium">
+                        MRP: {auditResult.extracted_fields?.mrp?.value || 'N/A'} | Qty: {auditResult.extracted_fields?.net_quantity?.value || 'N/A'}
+                      </p>
                     </div>
-                    <div className="bg-slate-50 p-3 rounded-lg">
-                      <p className="text-xs text-slate-500 mb-1">Hindi (Mandatory)</p>
-                      <p className="text-sm font-medium">मात्रा: 500ग्राम | मूल्य: ₹120</p>
-                    </div>
-                    <div className="bg-red-50 border border-red-200 p-3 rounded-lg">
-                      <p className="text-xs text-slate-500 mb-1">Regional Language (Tamil – Required by Rule 9(4))</p>
-                      <p className="text-sm font-medium">அளவு: 500கிராம் | விலை: ₹120</p>
-                      <p className="text-xs text-red-600 mt-2">⚠ Mismatch detected – Regional declaration does not match English/Hindi</p>
+                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg">
+                      <p className="text-xs text-slate-500 mb-1">Regional Language Compliance Check</p>
+                      <p className="text-sm font-medium text-blue-800">Rule 9(4) Verification Active</p>
                     </div>
                   </div>
                 </div>
@@ -311,7 +338,7 @@ export default function OfficerDashboard() {
               {auditResult && (
                 <div className="flex gap-3">
                   <button
-                    onClick={() => alert('Saved to local queue!')}
+                    onClick={() => alert('Saved to local inspector queue successfully!')}
                     className="flex-1 bg-gray-600 text-white py-3 rounded-xl font-semibold hover:bg-gray-700 transition flex items-center justify-center gap-2"
                   >
                     <Save className="w-5 h-5" />
@@ -334,12 +361,12 @@ export default function OfficerDashboard() {
                 <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
                   <h2 className="text-lg font-semibold text-slate-900 mb-4">Inspection Summary</h2>
                   <div className={`mb-4 p-4 rounded-xl ${
-                    auditResult.compliance_score >= 80 ? 'bg-green-50' :
-                    auditResult.compliance_score >= 50 ? 'bg-yellow-50' :
+                    (auditResult.compliance_score || 0) >= 80 ? 'bg-green-50' :
+                    (auditResult.compliance_score || 0) >= 50 ? 'bg-yellow-50' :
                     'bg-red-50'
                   }`}>
                     <div className="text-center">
-                      <span className="text-4xl font-bold text-slate-900">{auditResult.compliance_score}%</span>
+                      <span className="text-4xl font-bold text-slate-900">{auditResult.compliance_score ?? 0}%</span>
                       <p className="text-sm text-slate-500">Compliance Score</p>
                     </div>
                   </div>
@@ -349,11 +376,11 @@ export default function OfficerDashboard() {
                       <div key={index} className="p-3 bg-slate-50 rounded-lg">
                         <div className="flex items-start gap-2">
                           <AlertTriangle className={`w-5 h-5 ${
-                            violation.severity === 'critical' ? 'text-red-500' : 'text-yellow-500'
+                            violation.severity === 'CRITICAL' ? 'text-red-500' : 'text-yellow-500'
                           }`} />
                           <div>
                             <p className="text-sm font-semibold text-slate-900">{violation.message}</p>
-                            <span className="text-xs text-slate-500">{violation.rule}</span>
+                            <span className="text-xs text-slate-500">{violation.rule_code || violation.rule}</span>
                           </div>
                         </div>
                       </div>
@@ -362,7 +389,7 @@ export default function OfficerDashboard() {
                     {(!auditResult.violations || auditResult.violations.length === 0) && (
                       <div className="p-3 bg-green-50 rounded-lg flex items-center gap-2">
                         <CheckCircle2 className="w-5 h-5 text-green-600" />
-                        <p className="text-sm text-green-700">No violations found</p>
+                        <p className="text-sm text-green-700">No rule violations detected</p>
                       </div>
                     )}
                   </div>
@@ -417,24 +444,24 @@ export default function OfficerDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredHistory.map((item) => (
-                      <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
-                        <td className="py-3 px-4 text-sm font-medium text-slate-900">{item.product}</td>
-                        <td className="py-3 px-4 text-sm text-slate-600">{item.brand}</td>
+                    {filteredHistory.map((item, idx) => (
+                      <tr key={item.id || idx} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="py-3 px-4 text-sm font-medium text-slate-900">{item.product || item.product_name}</td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{item.brand || 'N/A'}</td>
                         <td className="py-3 px-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                            item.compliance === 'PASS' ? 'bg-green-100 text-green-700' :
+                            (item.compliance === 'PASS' || item.is_compliant) ? 'bg-green-100 text-green-700' :
                             item.compliance === 'WARNING' ? 'bg-yellow-100 text-yellow-700' :
                             'bg-red-100 text-red-700'
                           }`}>
-                            {item.compliance}
+                            {item.compliance || (item.is_compliant ? 'PASS' : 'VIOLATION')}
                           </span>
                         </td>
                         <td className="py-3 px-4 text-sm text-slate-600 flex items-center gap-1">
                           <MapPin className="w-4 h-4 text-slate-400" />
-                          {item.location}
+                          {item.location || item.location_name || 'N/A'}
                         </td>
-                        <td className="py-3 px-4 text-sm text-slate-600">{item.date}</td>
+                        <td className="py-3 px-4 text-sm text-slate-600">{item.date || item.timestamp?.split('T')[0]}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -442,7 +469,7 @@ export default function OfficerDashboard() {
               </div>
             </div>
 
-            {/* Violation Heat Map Placeholder */}
+            {/* Violation Hotspots */}
             <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
               <h2 className="text-lg font-semibold text-slate-900 mb-4">Violation Hotspots (Heat Map)</h2>
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -479,16 +506,16 @@ export default function OfficerDashboard() {
             <div className="space-y-4">
               <div className="bg-slate-50 rounded-lg p-4">
                 <p className="text-sm text-slate-500">Product</p>
-                <p className="font-semibold text-slate-900">{auditResult.product}</p>
+                <p className="font-semibold text-slate-900">{auditResult.product || auditResult.product_name}</p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="bg-slate-50 rounded-lg p-4">
                   <p className="text-sm text-slate-500">Inspection Date</p>
-                  <p className="font-semibold text-slate-900">{auditResult.inspection_date}</p>
+                  <p className="font-semibold text-slate-900">{new Date().toISOString().split('T')[0]}</p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-4">
                   <p className="text-sm text-slate-500">Score</p>
-                  <p className="font-semibold text-slate-900">{auditResult.compliance_score}%</p>
+                  <p className="font-semibold text-slate-900">{auditResult.compliance_score ?? 0}%</p>
                 </div>
               </div>
 
@@ -498,11 +525,11 @@ export default function OfficerDashboard() {
                   {auditResult.violations && auditResult.violations.map((violation, index) => (
                     <li key={index} className="flex items-start gap-2 text-sm">
                       <AlertTriangle className={`w-4 h-4 mt-0.5 ${
-                        violation.severity === 'critical' ? 'text-red-500' : 'text-yellow-500'
+                        violation.severity === 'CRITICAL' ? 'text-red-500' : 'text-yellow-500'
                       }`} />
                       <div>
                         <p className="text-slate-700">{violation.message}</p>
-                        <span className="text-xs text-slate-500">{violation.rule}</span>
+                        <span className="text-xs text-slate-500">{violation.rule_code || violation.rule}</span>
                       </div>
                     </li>
                   ))}
