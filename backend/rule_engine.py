@@ -83,16 +83,27 @@ def run_compliance_checks(
     # ==========================================
     # 3. RULE 7 FONT SIZE & READABILITY CHECK
     # ==========================================
+    readability_metrics = {
+        "readability_score": 100.0,
+        "font_size_pt": readability_data.get("min_font_size_pt", 3.5) if readability_data else 3.5,
+        "is_font_compliant": True,
+        "contrast_score": readability_data.get("contrast_score", 90.0) if readability_data else 90.0
+    }
+
     if is_offline:
         # In provisional offline mode, spatial font measurements require bounding boxes and are deferred
         logger.info("Skipping Rule 7 spatial font height verification in provisional offline mode.")
     elif readability_data:
         font_size_compliant = readability_data.get('font_size_compliant', True)
         contrast_compliant = readability_data.get('contrast_compliant', True)
+        min_req = readability_data.get('min_required_font_mm', 1.5)
+        actual_est = readability_data.get('estimated_actual_font_mm', 1.0)
+        contrast_score = readability_data.get('contrast_score', 90.0)
+        min_font_pt = readability_data.get('min_font_size_pt', 3.5)
 
+        r_score = 100.0
         if not font_size_compliant:
-            min_req = readability_data.get('min_required_font_mm', 1.5)
-            actual_est = readability_data.get('estimated_actual_font_mm', 1.0)
+            r_score -= 30.0
             violations.append({
                 "rule_code": "NON_COMPLIANT_FONT_SIZE",
                 "severity": "CRITICAL",
@@ -101,12 +112,20 @@ def run_compliance_checks(
             })
 
         if not contrast_compliant:
+            r_score -= 20.0
             violations.append({
                 "rule_code": "POOR_LABEL_CONTRAST",
                 "severity": "WARNING",
                 "field_name": "readability_analysis",
                 "message": "Poor color contrast detected between printed text and background substrate (Rule 9(1))."
             })
+
+        readability_metrics = {
+            "readability_score": max(r_score, 0.0),
+            "font_size_pt": min_font_pt,
+            "is_font_compliant": font_size_compliant,
+            "contrast_score": contrast_score
+        }
 
     # ==========================================
     # 4. SCORING & SECTION 36 PENALTY ESTIMATION
@@ -133,6 +152,8 @@ def run_compliance_checks(
         "critical_count": critical_count,
         "warning_count": warning_count,
         "estimated_penalty_inr": estimated_penalty_inr,
+        "challan_amount": estimated_penalty_inr,
+        "readability_metrics": readability_metrics,
         "statutory_reference": "Section 36(1), Legal Metrology Act, 2009",
         "violations": violations
     }

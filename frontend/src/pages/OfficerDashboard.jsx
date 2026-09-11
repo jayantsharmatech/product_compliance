@@ -4,13 +4,11 @@ import {
   Shield,
   ChevronLeft,
   Camera,
-  Calendar,
   AlertTriangle,
   FileCheck,
   MapPin,
   Search,
   Save,
-  Languages,
   TrendingUp,
   Users,
   LogOut,
@@ -364,20 +362,77 @@ export default function OfficerDashboard() {
 
       {showChallanModal && auditResult && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl relative">
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
               onClick={() => setShowChallanModal(false)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition"
             >
               <X className="w-5 h-5" />
             </button>
-            <h3 className="text-lg font-semibold mb-4 pr-8">Inspection Challan</h3>
-            <button
-              onClick={handleDownloadChallan}
-              className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition"
-            >
-              Download PDF Challan
-            </button>
+            
+            <h3 className="text-xl font-bold mb-4 pr-8 text-slate-900 border-b pb-2">
+              Statutory Inspection Challan
+            </h3>
+
+            <div className="space-y-4">
+              <div className="bg-slate-50 rounded-lg p-4 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-slate-500">Product Audited</p>
+                  <p className="font-semibold text-slate-900">{auditResult.product_name || auditResult.product}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Compliance Score</p>
+                  <p className="font-semibold text-blue-600">{auditResult.compliance_score ?? 0}%</p>
+                </div>
+              </div>
+
+              {/* Readability & Font Metrics Section */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <h4 className="font-semibold text-blue-900 text-sm mb-2">🔠 OCR Readability & Font Analysis</h4>
+                <div className="grid grid-cols-2 gap-2 text-xs text-blue-800">
+                  <div>Readability Index: <span className="font-bold">{auditResult.readability_metrics?.readability_score ?? 100}%</span></div>
+                  <div>Min Font Size: <span className="font-bold">{auditResult.readability_metrics?.font_size_pt ?? 3.5} pt</span></div>
+                  <div>Contrast Clarity: <span className="font-bold">{auditResult.readability_metrics?.contrast_score ?? 90}%</span></div>
+                  <div>Font Rule 7 Check: <span className="font-bold">{auditResult.readability_metrics?.is_font_compliant ? 'Pass' : 'Substandard'}</span></div>
+                </div>
+              </div>
+
+              {/* Challan Fine Amount Display */}
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
+                <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Compoundable Fine / Challan Amount</p>
+                <p className="text-3xl font-extrabold text-red-700 mt-1">
+                  ₹ {auditResult.challan_amount || auditResult.estimated_penalty_inr ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN') : '0'}
+                </p>
+                <p className="text-[11px] text-red-500 mt-1">Calculated per Legal Metrology Act compounding guidelines</p>
+              </div>
+
+              <div className="border-t border-slate-200 pt-3">
+                <h4 className="font-semibold text-slate-900 text-sm mb-2">Identified Infractions</h4>
+                <ul className="space-y-2 max-h-36 overflow-y-auto">
+                  {auditResult.violations && auditResult.violations.length > 0 ? (
+                    auditResult.violations.map((violation, index) => (
+                      <li key={index} className="flex items-start gap-2 text-xs bg-slate-50 p-2 rounded">
+                        <span className="font-bold text-red-600">●</span>
+                        <div>
+                          <p className="text-slate-700 font-medium">{violation.message}</p>
+                          <span className="text-[10px] text-slate-400 font-mono">{violation.rule_code}</span>
+                        </div>
+                      </li>
+                    ))
+                  ) : (
+                    <p className="text-xs text-green-600 font-medium">No violations recorded. Package is fully compliant.</p>
+                  )}
+                </ul>
+              </div>
+
+              <button
+                onClick={handleDownloadChallan}
+                className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-md"
+              >
+                <FileCheck className="w-5 h-5" />
+                Download Official PDF Challan
+              </button>
+            </div>
           </div>
         </div>
       )}
