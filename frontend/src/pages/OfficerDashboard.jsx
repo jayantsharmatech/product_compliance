@@ -363,15 +363,25 @@ export default function OfficerDashboard() {
 
       {showChallanModal && auditResult && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl">
-            <h3 className="text-lg font-semibold mb-4">Inspection Challan</h3>
-            <button onClick={handleDownloadChallan} className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold">Download PDF Challan</button>
+          <div className="bg-white rounded-2xl p-6 max-w-lg w-full shadow-2xl relative">
+            <button
+              onClick={() => setShowChallanModal(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h3 className="text-lg font-semibold mb-4 pr-8">Inspection Challan</h3>
+            <button
+              onClick={handleDownloadChallan}
+              className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition"
+            >
+              Download PDF Challan
+            </button>
           </div>
         </div>
-      )}
-    </div>
-  );
-}
+      )
+      };
+
 
 function StatCard({ icon: Icon, label, value, color }) {
   const colors = { blue: 'bg-blue-100 text-blue-700', red: 'bg-red-100 text-red-700', yellow: 'bg-yellow-100 text-yellow-700' };
