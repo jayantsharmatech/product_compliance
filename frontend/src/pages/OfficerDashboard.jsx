@@ -14,6 +14,7 @@ import {
   LogOut,
   Layers,
   X,
+  Download,
 } from 'lucide-react';
 import { officerAudit, officerHistory, generateChallan } from '../utils/api';
 import { officerLogout, getOfficer } from '../utils/auth';
@@ -48,6 +49,7 @@ export default function OfficerDashboard() {
     };
   }, []);
 
+  // Fetch true history without mock count interference
   useEffect(() => {
     const fetchHistory = async () => {
       try {
@@ -55,6 +57,7 @@ export default function OfficerDashboard() {
         setHistory(Array.isArray(data) ? data : []);
       } catch (err) {
         console.error('Failed to fetch history', err);
+        setHistory([]);
       }
     };
     fetchHistory();
@@ -125,9 +128,9 @@ export default function OfficerDashboard() {
     }
   };
 
-  const handleDownloadChallan = async () => {
+  const handleDownloadChallan = async (targetId = null) => {
     try {
-      const auditId = auditResult?.id || auditResult?.scan_id || 'audit_001';
+      const auditId = targetId || auditResult?.id || auditResult?.scan_id || 'audit_001';
       const pdfBlob = await generateChallan(auditId);
       const url = window.URL.createObjectURL(pdfBlob);
       const a = document.createElement('a');
@@ -136,7 +139,7 @@ export default function OfficerDashboard() {
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Failed to generate challan.');
+      alert('Failed to generate or download challan.');
     }
   };
 
@@ -252,9 +255,14 @@ export default function OfficerDashboard() {
                     <MapPin className="w-5 h-5 text-red-600" />
                     <div>
                       <p className="text-xs text-slate-500">Live Inspection GPS Coordinate</p>
-                      <p className="text-sm font-bold text-slate-800">
-                        {location.lat.toFixed(4)}°N, {location.lng.toFixed(4)}°E
-                      </p>
+                      <a 
+                        href={`https://www.google.com/maps?q=${location.lat},${location.lng}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="text-sm font-bold text-blue-600 hover:underline flex items-center gap-1"
+                      >
+                        {location.lat.toFixed(4)}°N, {location.lng.toFixed(4)}°E (Open Map ↗)
+                      </a>
                     </div>
                   </div>
                   <span className="bg-green-100 text-green-700 text-xs px-2.5 py-1 rounded-full font-semibold">Verified Live</span>
@@ -301,12 +309,21 @@ export default function OfficerDashboard() {
 
             <div className="space-y-6">
               {auditResult && (
-                <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Inspection Summary</h2>
-                  <div className="mb-4 p-4 rounded-xl bg-slate-50 text-center">
-                    <span className="text-4xl font-bold text-slate-900">{auditResult.compliance_score ?? 0}%</span>
-                    <p className="text-sm text-slate-500">Compliance Score</p>
+                <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200 space-y-4">
+                  <h2 className="text-lg font-semibold text-slate-900">Inspection Summary</h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 rounded-xl bg-slate-50 text-center">
+                      <span className="text-3xl font-bold text-slate-900">{auditResult.compliance_score ?? 0}%</span>
+                      <p className="text-xs text-slate-500 mt-1">Compliance Score</p>
+                    </div>
+                    <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-center">
+                      <span className="text-2xl font-extrabold text-red-700">
+                        ₹ {auditResult.challan_amount || auditResult.estimated_penalty_inr ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN') : '0'}
+                      </span>
+                      <p className="text-xs font-semibold text-red-600 mt-1">Challan Fine Amount</p>
+                    </div>
                   </div>
+
                   <div className="space-y-3">
                     {auditResult.violations?.map((v, idx) => (
                       <div key={idx} className="p-3 bg-red-50 rounded-lg flex items-start gap-2">
@@ -325,9 +342,9 @@ export default function OfficerDashboard() {
         ) : (
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <StatCard icon={TrendingUp} label="Total Audits" value="1,245" color="blue" />
-              <StatCard icon={AlertTriangle} label="Repeat Violators Flagged" value="37" color="red" />
-              <StatCard icon={Users} label="Active Citizen Complaints" value="158" color="yellow" />
+              <StatCard icon={TrendingUp} label="Total Audits" value={history.length} color="blue" />
+              <StatCard icon={AlertTriangle} label="Violations Flagged" value={history.filter(h => h.compliance === 'VIOLATION' || h.is_compliant === false).length} color="red" />
+              <StatCard icon={Users} label="Active Inspector Queue" value="Live" color="yellow" />
             </div>
 
             <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
@@ -337,24 +354,63 @@ export default function OfficerDashboard() {
                   <input type="text" placeholder="Search audits..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg" />
                 </div>
               </div>
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="border-b">
-                    <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Product</th>
-                    <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Compliance</th>
-                    <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Location</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredHistory.map((item, idx) => (
-                    <tr key={idx} className="border-b hover:bg-slate-50">
-                      <td className="py-3 px-4 text-sm font-medium">{item.product_name || item.product}</td>
-                      <td className="py-3 px-4"><span className="px-2 py-1 bg-green-100 text-green-700 text-xs rounded-full font-semibold">PASS</span></td>
-                      <td className="py-3 px-4 text-sm text-slate-600 flex items-center gap-1"><MapPin className="w-4 h-4 text-slate-400" />{item.location_name || 'Live GPS Recorded'}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Product</th>
+                      <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Compliance</th>
+                      <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Location</th>
+                      <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Date & Time</th>
+                      <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Action</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredHistory.map((item, idx) => {
+                      const itemLat = item.latitude || item.lat;
+                      const itemLng = item.longitude || item.lng;
+                      const itemDate = item.date || item.timestamp ? new Date(item.timestamp || item.date).toLocaleString() : 'Just now';
+                      const recordId = item.id || item.scan_id || idx;
+
+                      return (
+                        <tr key={recordId} className="border-b hover:bg-slate-50">
+                          <td className="py-3 px-4 text-sm font-medium">{item.product_name || item.product || 'Packaged Commodity'}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 text-xs rounded-full font-semibold ${item.compliance === 'PASS' || item.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {item.compliance || (item.is_compliant ? 'PASS' : 'VIOLATION')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-sm text-slate-600">
+                            {itemLat && itemLng ? (
+                              <a href={`https://www.google.com/maps?q=${itemLat},${itemLng}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-1 font-medium">
+                                <MapPin className="w-4 h-4 text-red-500" /> View Map ↗
+                              </a>
+                            ) : (
+                              <span>{item.location_name || 'Recorded GPS'}</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-xs text-slate-500 font-mono">{itemDate}</td>
+                          <td className="py-3 px-4">
+                            <button
+                              onClick={() => handleDownloadChallan(recordId)}
+                              className="px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-semibold hover:bg-blue-100 transition flex items-center gap-1"
+                            >
+                              <Download className="w-3.5 h-3.5" /> PDF
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredHistory.length === 0 && (
+                      <tr>
+                        <td colSpan="5" className="py-8 text-center text-sm text-slate-400">
+                          No audit history records available from live server.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -426,7 +482,7 @@ export default function OfficerDashboard() {
               </div>
 
               <button
-                onClick={handleDownloadChallan}
+                onClick={() => handleDownloadChallan()}
                 className="w-full bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-md"
               >
                 <FileCheck className="w-5 h-5" />
