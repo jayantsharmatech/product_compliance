@@ -103,7 +103,7 @@ export const citizenHistory = async () => {
   }
 
   const response = await api.get('/history');
-  return response.data;
+  return response.data.scans || response.data || [];
 };
 
 /**
@@ -161,7 +161,7 @@ export const officerHistory = async (filters = {}) => {
   }
 
   const response = await api.get('/history', { params: filters });
-  return response.data;
+  return response.data.scans || response.data || [];
 };
 
 /**
