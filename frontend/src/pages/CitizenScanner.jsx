@@ -356,11 +356,13 @@ export default function CitizenScanner() {
                 <div className="bg-slate-50 p-3 rounded-lg">
                   <div className="flex justify-between items-center mb-1">
                     <Building2 className="w-4 h-4 text-slate-500" />
-                    <FieldStatus fieldData={scanResult.extracted_fields?.manufacturer} />
+                    <FieldStatus fieldData={scanResult.extracted_fields?.manufacturer || scanResult.extracted_fields?.manufacturer_name} />
                   </div>
                   <p className="text-xs text-slate-500">Manufacturer</p>
                   <p className="font-semibold text-slate-900">
-                    {renderFieldValue(scanResult.extracted_fields?.manufacturer)}
+                    {renderFieldValue(scanResult.extracted_fields?.manufacturer) !== 'Not found'
+                      ? renderFieldValue(scanResult.extracted_fields?.manufacturer)
+                      : renderFieldValue(scanResult.extracted_fields?.manufacturer_name)}
                   </p>
                 </div>
               </div>
