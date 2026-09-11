@@ -125,14 +125,11 @@ async def scan_single_image(
                     }
                 ]
             }
-            # Total extraction failure (online AND offline both failed) — still worth
-            # queuing for retry, since connectivity or the local model may recover.
             image_paths = save_images_to_disk([image_bytes], scan_id)
             save_scan(fallback_record, max_records=10, sync_status="PENDING_SYNC", image_paths=image_paths)
             fallback_record["message"] = "Extraction failed both online and offline — queued for retry."
             return fallback_record
 
-        # Capture cascade execution metadata
         is_offline = extraction_result.get("is_offline", False)
         source_mode = extraction_result.get("source_mode", "ONLINE_API")
         model_used = extraction_result.get("model_used", "Unknown")
@@ -142,7 +139,6 @@ async def scan_single_image(
         is_food_or_perishable = extraction_result.get("is_food_or_perishable", True)
         requires_fssai = extraction_result.get("requires_fssai", False)
 
-        # Execute rules (Passing network state so Rule 7 can be safely deferred if offline)
         compliance_summary = run_compliance_checks(
             extracted_fields=extracted_fields,
             readability_data=readability_data,
@@ -166,8 +162,6 @@ async def scan_single_image(
         }
 
         if source_mode == "PROVISIONAL_OFFLINE":
-            # Ollama produced a result, but it's provisional — queue for
-            # re-verification against Gemini once connectivity returns.
             image_paths = save_images_to_disk([image_bytes], scan_id)
             save_scan(full_record, max_records=10, sync_status="PENDING_SYNC", image_paths=image_paths)
             full_record["message"] = "Provisional offline result — will auto-verify once online."
@@ -249,7 +243,6 @@ async def scan_multiple_images_endpoint(
             fallback_record["message"] = "Extraction failed both online and offline — queued for retry."
             return fallback_record
 
-        # Capture metadata for Rule Engine and Dashboard
         is_offline = extraction_result.get("is_offline", False)
         source_mode = extraction_result.get("source_mode", "ONLINE_API")
         model_used = extraction_result.get("model_used", "Unknown")
@@ -314,13 +307,6 @@ async def scan_multiple_images_endpoint(
 
 @app.post("/sync")
 async def sync_pending_scans():
-    """
-    Re-runs every PENDING_SYNC scan through the real online (Gemini) pipeline.
-    On success, overwrites the provisional record with the verified result
-    and re-runs compliance checks against the corrected data.
-
-    Call this from a "Sync now" button once WiFi is back, or on a timer.
-    """
     pending = get_pending_scans()
     synced, failed = 0, 0
     results = []
@@ -347,7 +333,6 @@ async def sync_pending_scans():
             )
 
             if not extraction_result.get("success") or extraction_result.get("source_mode") != "ONLINE_API":
-                # Still offline or Gemini failed again — leave it queued for next attempt
                 failed += 1
                 continue
 
@@ -375,7 +360,6 @@ async def sync_pending_scans():
 
             mark_scan_synced(scan_id, verified_record)
 
-            # Clean up the queued images now that we have a verified result
             for path in image_paths:
                 if os.path.exists(path):
                     os.remove(path)
@@ -393,7 +377,6 @@ async def sync_pending_scans():
 
 @app.get("/sync/pending-count")
 async def pending_sync_count():
-    """Lightweight endpoint for a UI badge showing how many scans await verification."""
     return {"pending": len(get_pending_scans())}
 
 
@@ -403,21 +386,15 @@ async def pending_sync_count():
 
 @app.get("/report/{scan_id}")
 async def get_pdf_report(scan_id: str):
-    """
-    Generates and downloads a formal Legal Metrology Compliance PDF.
-    Dynamically embeds 'Provisional Offline' watermarks if network was down.
-    """
     all_scans = get_all_scans()
     target_scan = next((s for s in all_scans if s.get("scan_id") == scan_id), None)
 
     if not target_scan:
         raise HTTPException(status_code=404, detail=f"Scan ID '{scan_id}' not found in inspection repository.")
 
-    # Retrieve execution metadata for PDF rendering
     is_offline = target_scan.get("is_offline", False)
     model_used = target_scan.get("model_used", "Unknown")
 
-    # Pass the flags to the ReportLab generator
     pdf_bytes = generate_compliance_pdf(target_scan, is_offline=is_offline, model_used=model_used)
 
     return Response(
@@ -442,21 +419,24 @@ async def get_inspection_history(
     offset: int = Query(0, ge=0)
 ):
     """
-    Retrieves stored inspection history (up to last 10 scans) with keyword search and filtering.
+    Retrieves stored inspection history with robust safety checks against null fields.
     """
     records = get_all_scans()
     filtered_records = []
 
     for record in records:
+        if not isinstance(record, dict):
+            continue
+
         if search:
             query = search.lower()
-            p_name = str(record.get("product_name", "")).lower()
-            s_id = str(record.get("scan_id", "")).lower()
-            loc = str(record.get("location_name", "")).lower()
+            p_name = str(record.get("product_name") or "").lower()
+            s_id = str(record.get("scan_id") or "").lower()
+            loc = str(record.get("location_name") or "").lower()
 
-            extracted = record.get("extracted_fields", {})
-            mfg_info = extracted.get("manufacturer_name", {})
-            mfg_name = (mfg_info.get("value") if isinstance(mfg_info, dict) else str(mfg_info)).lower()
+            extracted = record.get("extracted_fields") or {}
+            mfg_info = extracted.get("manufacturer_name") or {}
+            mfg_name = str(mfg_info.get("value") if isinstance(mfg_info, dict) else mfg_info).lower()
 
             if query not in p_name and query not in s_id and query not in mfg_name and query not in loc:
                 continue
@@ -471,7 +451,7 @@ async def get_inspection_history(
         elif compliance == "partially_compliant" and (is_compliant or score < 70):
             continue
 
-        rec_category = record.get("product_category", "Other")
+        rec_category = str(record.get("product_category") or "Other")
         if category != "all" and rec_category.lower() != category.lower():
             continue
 
@@ -490,7 +470,6 @@ async def get_inspection_history(
 
 @app.get("/history/{scan_id}")
 async def get_scan_by_id(scan_id: str):
-    """Retrieves single inspection record by Scan ID."""
     all_scans = get_all_scans()
     target_scan = next((s for s in all_scans if s.get("scan_id") == scan_id), None)
 
@@ -502,9 +481,6 @@ async def get_scan_by_id(scan_id: str):
 
 @app.get("/history/export/csv")
 async def export_inspection_history_csv():
-    """
-    Exports all inspection history records to editable CSV format.
-    """
     scans = get_all_scans()
     output = io.StringIO()
     writer = csv.writer(output)
@@ -517,15 +493,18 @@ async def export_inspection_history_csv():
     ])
 
     for record in scans:
-        extracted = record.get("extracted_fields", {})
+        if not isinstance(record, dict):
+            continue
+            
+        extracted = record.get("extracted_fields") or {}
 
-        mfg_data = extracted.get("manufacturer_name", {})
+        mfg_data = extracted.get("manufacturer_name") or {}
         mfg_val = mfg_data.get("value") if isinstance(mfg_data, dict) else str(mfg_data)
 
-        mrp_data = extracted.get("mrp", {})
+        mrp_data = extracted.get("mrp") or {}
         mrp_val = mrp_data.get("value") if isinstance(mrp_data, dict) else str(mrp_data)
 
-        qty_data = extracted.get("net_quantity", {})
+        qty_data = extracted.get("net_quantity") or {}
         qty_val = qty_data.get("value") if isinstance(qty_data, dict) else str(qty_data)
 
         status_str = "COMPLIANT" if record.get("is_compliant") else "NON-COMPLIANT"
@@ -564,9 +543,6 @@ async def export_inspection_history_csv():
 
 @app.get("/dashboard/stats")
 async def get_officer_dashboard_stats():
-    """
-    Provides aggregated analytics, exposing the execution mode for the dashboard feed.
-    """
     scans = get_all_scans()
     total_inspections = len(scans)
 
@@ -595,6 +571,9 @@ async def get_officer_dashboard_stats():
     violation_code_counts = {}
 
     for record in scans:
+        if not isinstance(record, dict):
+            continue
+            
         is_compliant = record.get("is_compliant", False)
         if is_compliant:
             compliant_count += 1
@@ -614,8 +593,9 @@ async def get_officer_dashboard_stats():
             category_counts[category]["non_compliant"] += 1
 
         for v in record.get("violations", []):
-            code = v.get("rule_code", "UNKNOWN_VIOLATION")
-            violation_code_counts[code] = violation_code_counts.get(code, 0) + 1
+            if isinstance(v, dict):
+                code = v.get("rule_code", "UNKNOWN_VIOLATION")
+                violation_code_counts[code] = violation_code_counts.get(code, 0) + 1
 
     sorted_violations = sorted(
         [{"rule_code": code, "count": count} for code, count in violation_code_counts.items()],
@@ -623,7 +603,7 @@ async def get_officer_dashboard_stats():
         reverse=True
     )
 
-    compliance_rate = round((compliant_count / total_inspections) * 100, 1)
+    compliance_rate = round((compliant_count / total_inspections) * 100, 1) if total_inspections > 0 else 100.0
 
     return {
         "overview": {
@@ -645,11 +625,11 @@ async def get_officer_dashboard_stats():
                 "product_category": r.get("product_category"),
                 "compliance_score": r.get("compliance_score"),
                 "is_compliant": r.get("is_compliant"),
-                "is_offline": r.get("is_offline", False),  # Frontend UI Flag
+                "is_offline": r.get("is_offline", False),
                 "source_mode": r.get("source_mode", "ONLINE_API"),
                 "location_name": r.get("location_name"),
                 "google_maps_url": r.get("google_maps_url")
             }
-            for r in scans[:5]
+            for r in scans[:5] if isinstance(r, dict)
         ]
     }
