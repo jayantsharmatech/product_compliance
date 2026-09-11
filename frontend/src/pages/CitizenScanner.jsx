@@ -25,7 +25,7 @@ export default function CitizenScanner() {
   const fileInputRef = useRef(null);
   const multiFileInputRef = useRef(null);
   
-  const [images, setImages] = useState([]); // Supports multiple image previews
+  const [images, setImages] = useState([]);
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [showReportModal, setShowReportModal] = useState(false);
@@ -49,6 +49,16 @@ export default function CitizenScanner() {
     };
   }, []);
 
+  // Safe helper to extract string values from field objects preventing React #31 errors
+  const renderFieldValue = (field) => {
+    if (!field) return 'Not found';
+    if (typeof field === 'string' || typeof field === 'number') return field;
+    if (typeof field === 'object') {
+      return field.value || field.raw_text || 'Not found';
+    }
+    return 'Not found';
+  };
+
   // Handle single or multiple file uploads
   const handleFilesSelected = async (event, isMultiple = false) => {
     const files = Array.from(event.target.files);
@@ -58,7 +68,6 @@ export default function CitizenScanner() {
     setError(null);
 
     try {
-      // Read all files for preview
       const previewPromises = files.map((file) => {
         return new Promise((resolve) => {
           const reader = new FileReader();
@@ -78,7 +87,7 @@ export default function CitizenScanner() {
       }
       setScanResult(result);
     } catch (err) {
-      setError('Backend not connected or failed to parse. Using fallback display.');
+      setError('Backend connection failed or parsing error. Using fallback display.');
     } finally {
       setIsScanning(false);
     }
@@ -116,9 +125,8 @@ export default function CitizenScanner() {
     }
   };
 
-  // Robust Field Status check to avoid false "X" marks on valid values
   const FieldStatus = ({ fieldData }) => {
-    const value = fieldData?.value;
+    const value = typeof fieldData === 'object' ? fieldData?.value : fieldData;
     const status = fieldData?.status;
 
     const isAvailable = value && value !== 'Not found' && value !== null && status !== 'missing';
@@ -153,7 +161,6 @@ export default function CitizenScanner() {
               </div>
             </div>
 
-            {/* Dynamic Online/Offline Indicator */}
             <div
               className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${
                 isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
@@ -198,7 +205,6 @@ export default function CitizenScanner() {
                 </button>
               </div>
               
-              {/* Single File Input */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -208,7 +214,6 @@ export default function CitizenScanner() {
                 className="hidden"
               />
               
-              {/* Multiple File Input */}
               <input
                 ref={multiFileInputRef}
                 type="file"
@@ -250,7 +255,6 @@ export default function CitizenScanner() {
           )}
         </div>
 
-        {/* Error Message */}
         {error && (
           <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 p-4 rounded-lg mb-6">
             {error}
@@ -301,7 +305,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">MRP</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.mrp?.value || scanResult.extracted_fields?.mrp || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.mrp)}
                   </p>
                 </div>
 
@@ -312,7 +316,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">Net Quantity</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.net_quantity?.value || scanResult.extracted_fields?.net_quantity || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.net_quantity)}
                   </p>
                 </div>
 
@@ -323,7 +327,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">Manufacturing Date</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.mfg_date?.value || scanResult.extracted_fields?.mfg_date || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.mfg_date)}
                   </p>
                 </div>
 
@@ -334,7 +338,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">Expiry Date</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.expiry_date?.value || scanResult.extracted_fields?.expiry_date || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.expiry_date)}
                   </p>
                 </div>
 
@@ -345,7 +349,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">Consumer Care</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.consumer_care?.value || scanResult.extracted_fields?.consumer_care || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.consumer_care)}
                   </p>
                 </div>
 
@@ -356,7 +360,7 @@ export default function CitizenScanner() {
                   </div>
                   <p className="text-xs text-slate-500">Manufacturer</p>
                   <p className="font-semibold text-slate-900">
-                    {scanResult.extracted_fields?.manufacturer?.value || scanResult.extracted_fields?.manufacturer || 'Not found'}
+                    {renderFieldValue(scanResult.extracted_fields?.manufacturer)}
                   </p>
                 </div>
               </div>
@@ -394,7 +398,6 @@ export default function CitizenScanner() {
                 </div>
               )}
 
-              {/* Report Button */}
               <button
                 onClick={getLocation}
                 className="w-full bg-red-600 text-white py-3 rounded-xl font-semibold hover:bg-red-700 transition flex items-center justify-center gap-2"
@@ -406,7 +409,6 @@ export default function CitizenScanner() {
           </div>
         )}
 
-        {/* Info Section */}
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mt-8">
           <div className="flex items-start gap-3">
             <Info className="w-5 h-5 text-blue-600 mt-0.5" />
