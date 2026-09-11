@@ -15,6 +15,7 @@ import {
   Users,
   LogOut,
   Layers,
+  X,
 } from 'lucide-react';
 import { officerAudit, officerHistory, generateChallan } from '../utils/api';
 import { officerLogout, getOfficer } from '../utils/auth';
@@ -379,9 +380,10 @@ export default function OfficerDashboard() {
             </button>
           </div>
         </div>
-      )
-      };
-
+      )}
+    </div>
+  );
+}
 
 function StatCard({ icon: Icon, label, value, color }) {
   const colors = { blue: 'bg-blue-100 text-blue-700', red: 'bg-red-100 text-red-700', yellow: 'bg-yellow-100 text-yellow-700' };
