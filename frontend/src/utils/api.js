@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Use environment variable for API URL (set in .env)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Use relative URL '' in production to route through Vercel rewrites (bypasses Mixed Content)
+const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 
 // Mock toggle - set to false when backend is ready
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
@@ -80,7 +80,6 @@ api.interceptors.request.use((config) => {
  */
 export const citizenScan = async (imageFile) => {
   if (USE_MOCK) {
-    // Simulate network delay
     await new Promise((resolve) => setTimeout(resolve, 1500));
     return mockCitizenScan;
   }
@@ -103,7 +102,7 @@ export const citizenHistory = async () => {
     return mockHistory;
   }
 
-  const response = await api.get('/api/public/history');
+  const response = xmlnsGet('/api/public/history');
   return response.data;
 };
 
