@@ -49,7 +49,7 @@ export default function OfficerDashboard() {
     };
   }, []);
 
-  // Fetch true history without mock count interference
+  // Fetch history
   useEffect(() => {
     const fetchHistory = async () => {
       try {
@@ -143,6 +143,18 @@ export default function OfficerDashboard() {
     }
   };
 
+  // Helper to compute dynamic bounding box style from Gemini's [ymin, xmin, ymax, xmax] 0-1000 scale
+  const getDynamicBoxStyle = (box2d) => {
+    if (!box2d || !Array.isArray(box2d) || box2d.length !== 4) return null;
+    const [ymin, xmin, ymax, xmax] = box2d;
+    return {
+      top: `${(ymin / 1000) * 100}%`,
+      left: `${(xmin / 1000) * 100}%`,
+      height: `${((ymax - ymin) / 1000) * 100}%`,
+      width: `${((xmax - xmin) / 1000) * 100}%`,
+    };
+  };
+
   const filteredHistory = history.filter((item) => {
     const productName = item.product || item.product_name || '';
     const brandName = item.brand || '';
@@ -223,15 +235,29 @@ export default function OfficerDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-black/90 p-2">
-                      <div className="relative inline-block w-full">
-                        <img src={images[0]} alt="Spatial OCR Target" className="w-full h-72 object-contain mx-auto" />
-                        <div className="absolute top-10 left-12 border-2 border-emerald-400 bg-emerald-400/20 px-1 text-[10px] text-emerald-200 font-mono">
-                          MRP Box [Detected]
-                        </div>
-                        <div className="absolute bottom-16 right-16 border-2 border-blue-400 bg-blue-400/20 px-1 text-[10px] text-blue-200 font-mono">
-                          Net Qty Box [Detected]
-                        </div>
+                    <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-black/90 p-2 flex justify-center">
+                      <div className="relative inline-block">
+                        <img src={images[0]} alt="Spatial OCR Target" className="max-h-80 object-contain mx-auto block" />
+                        
+                        {/* Dynamic Bounding Box for MRP */}
+                        {auditResult?.extracted_fields?.mrp?.box_2d && getDynamicBoxStyle(auditResult.extracted_fields.mrp.box_2d) && (
+                          <div 
+                            className="absolute border-2 border-emerald-400 bg-emerald-400/20 px-1 text-[10px] text-emerald-200 font-mono pointer-events-none"
+                            style={getDynamicBoxStyle(auditResult.extracted_fields.mrp.box_2d)}
+                          >
+                            MRP [Detected]
+                          </div>
+                        )}
+
+                        {/* Dynamic Bounding Box for Net Quantity */}
+                        {auditResult?.extracted_fields?.net_quantity?.box_2d && getDynamicBoxStyle(auditResult.extracted_fields.net_quantity.box_2d) && (
+                          <div 
+                            className="absolute border-2 border-blue-400 bg-blue-400/20 px-1 text-[10px] text-blue-200 font-mono pointer-events-none"
+                            style={getDynamicBoxStyle(auditResult.extracted_fields.net_quantity.box_2d)}
+                          >
+                            Net Qty [Detected]
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -242,7 +268,7 @@ export default function OfficerDashboard() {
                       </div>
                     )}
 
-                    <button onClick={() => setImages([])} className="w-full bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition text-sm">
+                    <button onClick={() => { setImages([]); setAuditResult(null); }} className="w-full bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition text-sm">
                       Clear & Reset Audit Images
                     </button>
                   </div>
