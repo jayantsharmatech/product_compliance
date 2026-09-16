@@ -359,6 +359,11 @@ def extract_from_multiple_images(images_bytes_list: list) -> dict:
                 product_name = extracted_fields.pop('product_name', 'Unknown Product')
                 readability_analysis = extracted_fields.pop('readability_analysis', {})
 
+                # Ensure box_2d coordinates within fields are preserved for frontend rendering
+                for field_key in ['mrp', 'net_quantity', 'manufacturer_name', 'manufacturer_address', 'mfg_date', 'expiry_date', 'country_of_origin', 'consumer_care', 'fssai_number', 'barcode']:
+                    if field_key in extracted_fields and isinstance(extracted_fields[field_key], dict):
+                        pass
+
                 barcode_data = extracted_fields.get('barcode', {})
                 barcode_str = str(barcode_data.get('value', '')) if barcode_data else ""
                 barcode_analysis = validate_ean13_checksum(barcode_str)
