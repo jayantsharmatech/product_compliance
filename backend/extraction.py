@@ -31,12 +31,12 @@ def init_gemini():
 # Removed gemini-2.0-flash and gemini-1.5-flash — both are shut down and
 # were previously guaranteed 404s + wasted retry delay on every scan.
 MODELS_TO_TRY = [
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
     "gemini-3.5-flash",
     "gemini-2.5-flash",
-    "gemini-3.1-pro-preview",
     "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
 ]
 
 # Used for the local Ollama/llava fallback. Deliberately does NOT ask for
