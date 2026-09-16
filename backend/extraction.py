@@ -28,8 +28,6 @@ def init_gemini():
 
 
 # Trimmed to models that are actually live on the Gemini Developer API.
-# Removed gemini-2.0-flash and gemini-1.5-flash — both are shut down and
-# were previously guaranteed 404s + wasted retry delay on every scan.
 MODELS_TO_TRY = [
     "gemini-3.5-flash",
     "gemini-2.5-flash",
@@ -39,11 +37,7 @@ MODELS_TO_TRY = [
     "gemini-3.8-flash",
 ]
 
-# Used for the local Ollama/llava fallback. Deliberately does NOT ask for
-# bounding boxes — small local vision models hallucinate coordinates just as
-# readily as they hallucinate values, and a confidently-wrong box is worse
-# than no box (it looks like verified evidence when it isn't). This mirrors
-# the existing Rule 7 font-check deferral in rule_engine.py for offline mode.
+# Used for the local Ollama/llava fallback.
 OFFLINE_EXTRACTION_PROMPT = """You are a Legal Metrology label inspector for Indian products under the Legal Metrology (Packaged Commodities) Rules, 2011.
 
 IMPORTANT: You are provided with 1 or more images showing different sides/panels of the same product packaging. Combine and aggregate all label information seen across ALL provided images into a single consolidated report.
@@ -117,11 +111,7 @@ Return ONLY a valid JSON object matching this exact structure:
 IMPORTANT: Return strictly valid JSON only with no markdown wrapping.
 """
 
-# Used for the online Gemini path. Same schema as offline, PLUS a "box_2d"
-# field per declaration so the frontend BoundingBoxInspector can draw evidence
-# boxes on the packaging photo. box_2d uses Gemini's standard normalized
-# [ymin, xmin, ymax, xmax] scale from 0-1000, relative to the FIRST image
-# provided (see caveat below for multi-image scans).
+# Updated ONLINE_EXTRACTION_PROMPT with strict spatial bounding box requirements
 ONLINE_EXTRACTION_PROMPT = """You are a Legal Metrology label inspector for Indian products under the Legal Metrology (Packaged Commodities) Rules, 2011.
 
 IMPORTANT: You are provided with 1 or more images showing different sides/panels of the same product packaging. Combine and aggregate all label information seen across ALL provided images into a single consolidated report.
@@ -129,11 +119,11 @@ IMPORTANT: You are provided with 1 or more images showing different sides/panels
 1. IDENTIFY PRODUCT CATEGORY:
 - Food & Beverages | Cosmetics & Personal Care | Medicines & Healthcare | Electronics & Appliances | Stationery & Office | Clothing & Textiles | Household Items | Other
 
-2. EXTRACT MANDATORY LABEL DECLARATIONS:
-Extract fields accurately: product_name, is_food_or_perishable (boolean), requires_fssai (boolean), mrp (numeric value & raw text), net_quantity (amount & unit), manufacturer_name, manufacturer_address, mfg_date, expiry_date (if food), country_of_origin, consumer_care, fssai_number (if food), and barcode digits.
-
-3. LOCATE EACH DECLARATION SPATIALLY:
-For every field found ON THE FIRST IMAGE PROVIDED, also return its pixel location as "box_2d": [ymin, xmin, ymax, xmax], normalized to a 0-1000 scale relative to that first image's full width/height (standard convention: top-left origin, ymin/ymax are vertical, xmin/xmax are horizontal). If a field was only visible on a LATER image (2nd, 3rd, etc.) rather than the first, or its exact print location can't be pinpointed, set "box_2d" to null rather than guessing — do not fabricate coordinates.
+2. EXTRACT MANDATORY LABEL DECLARATIONS & LOCATE SPATIALLY:
+For every field found, you MUST return its exact location on THE FIRST IMAGE PROVIDED as a normalized bounding box "box_2d": [ymin, xmin, ymax, xmax] scaled strictly from 0 to 1000 (top-left origin). 
+- DO NOT hardcode, fake, or estimate coordinates. 
+- If a declaration is present on the product image, pinpoint its actual bounding box [ymin, xmin, ymax, xmax]. 
+- If the field is truly missing from the image or cannot be found, set "found": false and "box_2d": null.
 
 Return ONLY a valid JSON object matching this exact structure:
 
@@ -270,11 +260,10 @@ def clean_json_response(response_text: str) -> dict:
 def fallback_offline_extraction(processed_images: list) -> dict:
     """
     Edge-AI Offline Fallback using local Ollama (llava).
-    Processes packaging images locally without internet or cloud keys.
     """
     logger.warning("⚡ Entering PROVISIONAL_OFFLINE Mode (Local Edge-AI via Ollama)")
 
-    ollama_url = "http://127.0.0.1:11434/api/generate"
+    ollama_url = "[http://127.0.0.1:11434/api/generate](http://127.0.0.1:11434/api/generate)"
 
     try:
         buffered = io.BytesIO()
