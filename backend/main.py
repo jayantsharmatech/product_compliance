@@ -5,6 +5,7 @@ import time
 import json
 import uuid
 import logging
+import asyncio
 from datetime import datetime
 from typing import Optional, List
 from urllib.parse import quote
@@ -34,15 +35,20 @@ app = FastAPI(
 )
 
 # Enable CORS for Frontend/Dashboard integration
+origins = [
+    "https://frontend-livid-two-fzsa11o9z7.vercel.app",
+    "http://localhost:5173", # for local testing if needed
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Where raw images for PENDING_SYNC scans are kept until they're verified online
+# Where raw images for PENDING_SYNC scans are kept until verified online
 IMAGE_STORE_DIR = "queued_scan_images"
 os.makedirs(IMAGE_STORE_DIR, exist_ok=True)
 
@@ -77,7 +83,7 @@ async def scan_single_image(
     location_name: Optional[str] = Form("Delhi NCR, India")
 ):
     """
-    Scans a single packaged commodity label image, handles API/Offline cascade,
+    Scans a single packaged commodity label image asynchronously,
     runs compliance validation, and saves the record.
     """
     scan_id = f"scan_{int(time.time() * 1000)}"
@@ -91,7 +97,9 @@ async def scan_single_image(
 
     try:
         image_bytes = await file.read()
-        extraction_result = extract_from_image(image_bytes)
+        
+        # Run synchronous OCR extraction in a thread pool to prevent blocking
+        extraction_result = await asyncio.to_thread(extract_from_image, image_bytes)
 
         if not extraction_result.get("success"):
             error_msg = extraction_result.get("error", "Vision OCR Extraction Failed")
@@ -139,7 +147,9 @@ async def scan_single_image(
         is_food_or_perishable = extraction_result.get("is_food_or_perishable", True)
         requires_fssai = extraction_result.get("requires_fssai", False)
 
-        compliance_summary = run_compliance_checks(
+        # Run compliance checks asynchronously
+        compliance_summary = await asyncio.to_thread(
+            run_compliance_checks,
             extracted_fields=extracted_fields,
             readability_data=readability_data,
             is_food_or_perishable=is_food_or_perishable,
@@ -198,7 +208,7 @@ async def scan_multiple_images_endpoint(
     location_name: Optional[str] = Form("Delhi NCR, India")
 ):
     """
-    Processes multiple image uploads using the API/Offline cascade engine.
+    Processes multiple image uploads asynchronously using the API/Offline cascade engine.
     """
     scan_id = f"scan_{int(time.time() * 1000)}"
     timestamp_str = datetime.now().isoformat()
@@ -211,7 +221,9 @@ async def scan_multiple_images_endpoint(
 
     try:
         images_bytes = [await f.read() for f in files]
-        extraction_result = extract_from_multiple_images(images_bytes)
+        
+        # Run multi-image OCR extraction asynchronously
+        extraction_result = await asyncio.to_thread(extract_from_multiple_images, images_bytes)
 
         if not extraction_result.get("success"):
             error_msg = extraction_result.get("error", "Multi-image OCR extraction failed")
@@ -252,7 +264,9 @@ async def scan_multiple_images_endpoint(
         is_food_or_perishable = extraction_result.get("is_food_or_perishable", True)
         requires_fssai = extraction_result.get("requires_fssai", False)
 
-        compliance_summary = run_compliance_checks(
+        # Run compliance checks asynchronously
+        compliance_summary = await asyncio.to_thread(
+            run_compliance_checks,
             extracted_fields=extracted_fields,
             readability_data=readability_data,
             is_food_or_perishable=is_food_or_perishable,
@@ -302,7 +316,7 @@ async def scan_multiple_images_endpoint(
 
 
 # ==========================================
-# 1B. SYNC ENDPOINTS — reconcile provisional scans once online
+# 1B. SYNC ENDPOINTS
 # ==========================================
 
 @app.post("/sync")
@@ -326,10 +340,10 @@ async def sync_pending_scans():
                 failed += 1
                 continue
 
-            extraction_result = (
-                extract_from_image(images_bytes[0])
-                if len(images_bytes) == 1
-                else extract_from_multiple_images(images_bytes)
+            extraction_result = await asyncio.to_thread(
+                extract_from_image, images_bytes[0]
+            ) if len(images_bytes) == 1 else await asyncio.to_thread(
+                extract_from_multiple_images, images_bytes
             )
 
             if not extraction_result.get("success") or extraction_result.get("source_mode") != "ONLINE_API":
@@ -341,7 +355,8 @@ async def sync_pending_scans():
             is_food_or_perishable = extraction_result.get("is_food_or_perishable", True)
             requires_fssai = extraction_result.get("requires_fssai", False)
 
-            compliance_summary = run_compliance_checks(
+            compliance_summary = await asyncio.to_thread(
+                run_compliance_checks,
                 extracted_fields=extracted_fields,
                 readability_data=readability_data,
                 is_food_or_perishable=is_food_or_perishable,
@@ -395,7 +410,9 @@ async def get_pdf_report(scan_id: str):
     is_offline = target_scan.get("is_offline", False)
     model_used = target_scan.get("model_used", "Unknown")
 
-    pdf_bytes = generate_compliance_pdf(target_scan, is_offline=is_offline, model_used=model_used)
+    pdf_bytes = await asyncio.to_thread(
+        generate_compliance_pdf, target_scan, is_offline=is_offline, model_used=model_used
+    )
 
     return Response(
         content=pdf_bytes,
@@ -418,9 +435,6 @@ async def get_inspection_history(
     limit: int = Query(10, ge=1, le=100),
     offset: int = Query(0, ge=0)
 ):
-    """
-    Retrieves stored inspection history with robust safety checks against null fields.
-    """
     records = get_all_scans()
     filtered_records = []
 
