@@ -6,7 +6,7 @@ import json
 import uuid
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 from urllib.parse import quote
 
@@ -26,6 +26,9 @@ from database import init_db, save_scan, get_all_scans, get_pending_scans, mark_
 # Setup Logger
 logger = logging.getLogger("uvicorn")
 logger.setLevel(logging.INFO)
+
+# Define IST Timezone Offset (+5:30)
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # Initialize FastAPI App
 app = FastAPI(
@@ -87,7 +90,7 @@ async def scan_single_image(
     runs compliance validation, and saves the record.
     """
     scan_id = f"scan_{int(time.time() * 1000)}"
-    timestamp_str = datetime.now().isoformat()
+    timestamp_str = datetime.now(IST).isoformat()
 
     google_maps_url = ""
     if latitude is not None and longitude is not None:
@@ -211,7 +214,7 @@ async def scan_multiple_images_endpoint(
     Processes multiple image uploads asynchronously using the API/Offline cascade engine.
     """
     scan_id = f"scan_{int(time.time() * 1000)}"
-    timestamp_str = datetime.now().isoformat()
+    timestamp_str = datetime.now(IST).isoformat()
 
     google_maps_url = ""
     if latitude is not None and longitude is not None:
@@ -542,7 +545,7 @@ async def export_inspection_history_csv():
         ])
 
     output.seek(0)
-    filename = f"Legal_Metrology_Inspection_Log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    filename = f"Legal_Metrology_Inspection_Log_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}.csv"
 
     return StreamingResponse(
         io.BytesIO(output.getvalue().encode('utf-8')),
