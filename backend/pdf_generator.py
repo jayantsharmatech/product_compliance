@@ -187,7 +187,11 @@ def generate_compliance_pdf(scan_data: dict, is_offline: bool = False, model_use
             val = str(field_info) if field_info else 'Not found'
             found = bool(field_info)
 
-        if found and val != 'Not found':
+        # Check if extracted text is an evasive pointer phrase rather than a valid declaration
+        val_upper = str(val).upper()
+        is_pointer = any(phrase in val_upper for phrase in ["SEE BOTTLE", "REFER", "SEE CAP", "SEE BODY", "AS PER PACK"])
+
+        if found and val != 'Not found' and not is_pointer:
             status_text = "<font color='#166534'><b>✓ Found</b></font>"
         else:
             status_text = "<font color='#991B1B'><b>✗ Missing</b></font>"
