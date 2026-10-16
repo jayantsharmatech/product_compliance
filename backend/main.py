@@ -1,9 +1,18 @@
 import os
-import time
+import sys
+import io
 import json
 import base64
 import logging
+from pathlib import Path
+from datetime import datetime
 from typing import List, Optional, Dict, Any
+from contextlib import asynccontextmanager
+
+# 1. Resolve Python path for Vercel serverless environment
+backend_dir = Path(__file__).resolve().parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Response, Query
 from fastapi.staticfiles import StaticFiles
