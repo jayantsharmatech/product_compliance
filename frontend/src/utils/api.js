@@ -1,7 +1,11 @@
 import axios from 'axios';
 
-// Dynamically connect to local FastAPI backend (or env override)
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+// Automatically uses local host during development ('npm run dev')
+// and relative path ('') in production so Vercel proxies requests directly to FastAPI
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV ? 'http://localhost:8000' : '');
 
 // Default mock mode to FALSE so live API calls reach your backend
 const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
