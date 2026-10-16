@@ -1,5 +1,7 @@
-backend/.env
-backend/venv/
-backend/__pycache__/
-backend/scans_history.db
-backend/queued_scan_images/
+.env
+__pycache__/
+*.pyc
+static/scans/
+reports/
+*.db
+.venv/

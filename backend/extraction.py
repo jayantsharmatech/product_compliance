@@ -3,9 +3,8 @@ import os
 import re
 import json
 import time
-import base64
 import logging
-import requests
+from typing import List, Optional
 from PIL import Image
 from dotenv import load_dotenv
 from google import genai
@@ -18,311 +17,100 @@ client = None
 
 
 def init_gemini():
-    """Initialize Gemini client using GEMINI_API_KEY environment variable."""
+    """Initialize Gemini client using GEMINI_API_KEY from backend/.env."""
     global client
     load_dotenv()
     api_key = os.getenv("GEMINI_API_KEY")
     if api_key:
-        client = genai.Client(api_key=api_key)
+        try:
+            client = genai.Client(api_key=api_key)
+            logger.info("✅ Gemini Client initialized successfully.")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Gemini Client: {e}")
+            client = None
+    else:
+        logger.error("❌ GEMINI_API_KEY is missing from backend/.env!")
     return client
 
 
-# Trimmed to models that are actually live on the Gemini Developer API.
 MODELS_TO_TRY = [
-    "gemini-3.5-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
-    "gemini-3.1-pro-preview",
-    "gemini-3.7-flash",
     "gemini-3.8-flash",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.7-flash",
 ]
 
-# Used for the local Ollama/llava fallback.
-OFFLINE_EXTRACTION_PROMPT = """You are a Legal Metrology label inspector for Indian products under the Legal Metrology (Packaged Commodities) Rules, 2011.
+ONLINE_EXTRACTION_PROMPT = """You are an expert Legal Metrology packaging inspector for Indian commodities under the Legal Metrology (Packaged Commodities) Rules, 2011 and FSSAI Act.
 
-IMPORTANT: You are provided with 1 or more images showing different sides/panels of the same product packaging. Combine and aggregate all label information seen across ALL provided images into a single consolidated report.
+First, determine the PRODUCT CATEGORY from the packaging image:
+- "Food & Beverages" (e.g., health drinks, snacks, spices, water)
+- "Cosmetics & Personal Care" (e.g., soaps, creams, shampoos)
+- "Electronics & Electricals" (e.g., cables, chargers, appliances)
+- "Apparel & Textiles" (e.g., garments, fabrics)
+- "General Packaged Commodity" (e.g., utensils, stationery, hardware)
 
-1. IDENTIFY PRODUCT CATEGORY:
-- Food & Beverages | Cosmetics & Personal Care | Medicines & Healthcare | Electronics & Appliances | Stationery & Office | Clothing & Textiles | Household Items | Other
+Set the compliance flags:
+- "requires_fssai": true ONLY if category is "Food & Beverages" or consumable food/supplement.
+- "requires_expiry": true if the product is food, pharmaceutical, cosmetic, or perishable. False for durable goods like clothes, electronics, utensils, tools.
+- "is_imported": true if product is imported into India.
 
-2. EXTRACT MANDATORY LABEL DECLARATIONS:
-Extract fields accurately: product_name, is_food_or_perishable (boolean), requires_fssai (boolean), mrp (numeric value & raw text), net_quantity (amount & unit), manufacturer_name, manufacturer_address, mfg_date, expiry_date (if food), country_of_origin, consumer_care, fssai_number (if food), and barcode digits.
+Extract all present statutory label declarations with 2D bounding boxes normalized [ymin, xmin, ymax, xmax] (0 to 1000 scale).
 
-Return ONLY a valid JSON object matching this exact structure:
-
+Return ONLY a valid JSON object matching this structure:
 {
-  "product_category": "<category name>",
-  "is_food_or_perishable": <true or false>,
-  "requires_fssai": <true or false>,
   "product_name": "<detected product name>",
-  "mrp": {
-    "value": <number or null>,
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "net_quantity": {
-    "value": "<amount as string>",
-    "unit": "<unit>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "manufacturer_name": {
-    "value": "<company name or null>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "manufacturer_address": {
-    "value": "<full address or null>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "mfg_date": {
-    "value": "<date>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "expiry_date": {
-    "value": "<date>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "country_of_origin": {
-    "value": "<country name>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "consumer_care": {
-    "value": "<contact info>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "fssai_number": {
-    "value": "<14 digit number>",
-    "raw_text": "<exact text>",
-    "found": <true/false>
-  },
-  "barcode": {
-    "value": "<extracted digit string or null>",
-    "raw_text": "<exact digits>",
-    "found": <true/false>
-  }
-}
-
-IMPORTANT: Return strictly valid JSON only with no markdown wrapping.
-"""
-
-# Updated ONLINE_EXTRACTION_PROMPT with strict spatial bounding box requirements
-ONLINE_EXTRACTION_PROMPT = """You are a Legal Metrology label inspector for Indian products under the Legal Metrology (Packaged Commodities) Rules, 2011.
-
-IMPORTANT: You are provided with 1 or more images showing different sides/panels of the same product packaging. Combine and aggregate all label information seen across ALL provided images into a single consolidated report.
-
-1. IDENTIFY PRODUCT CATEGORY:
-- Food & Beverages | Cosmetics & Personal Care | Medicines & Healthcare | Electronics & Appliances | Stationery & Office | Clothing & Textiles | Household Items | Other
-
-2. EXTRACT MANDATORY LABEL DECLARATIONS & LOCATE SPATIALLY:
-For every field found, you MUST return its exact location on THE FIRST IMAGE PROVIDED as a normalized bounding box "box_2d": [ymin, xmin, ymax, xmax] scaled strictly from 0 to 1000 (top-left origin). 
-- DO NOT hardcode, fake, or estimate coordinates. 
-- If a declaration is present on the product image, pinpoint its actual bounding box [ymin, xmin, ymax, xmax]. 
-- If the field is truly missing from the image or cannot be found, set "found": false and "box_2d": null.
-
-Return ONLY a valid JSON object matching this exact structure:
-
-{
   "product_category": "<category name>",
-  "is_food_or_perishable": <true or false>,
-  "requires_fssai": <true or false>,
-  "product_name": "<detected product name>",
-  "mrp": {
-    "value": <number or null>,
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "net_quantity": {
-    "value": "<amount as string>",
-    "unit": "<unit>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "manufacturer_name": {
-    "value": "<company name or null>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "manufacturer_address": {
-    "value": "<full address or null>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "mfg_date": {
-    "value": "<date>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "expiry_date": {
-    "value": "<date>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "country_of_origin": {
-    "value": "<country name>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "consumer_care": {
-    "value": "<contact info>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "fssai_number": {
-    "value": "<14 digit number>",
-    "raw_text": "<exact text>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  },
-  "barcode": {
-    "value": "<extracted digit string or null>",
-    "raw_text": "<exact digits>",
-    "found": <true/false>,
-    "box_2d": [<ymin>, <xmin>, <ymax>, <xmax>] or null
-  }
+  "requires_fssai": true/false,
+  "requires_expiry": true/false,
+  "is_imported": true/false,
+  "mrp": { "value": 185.0, "raw_text": "MRP: ₹ 185.00", "found": true, "box_2d": [780, 250, 830, 550] },
+  "unit_sale_price": { "value": "0.37", "raw_text": "UNIT SALE PRICE PER g: ₹ 0.37", "found": true, "box_2d": [835, 250, 880, 550] },
+  "net_quantity": { "value": "500 g", "unit": "g", "raw_text": "NET QTY.: 500 g", "found": true, "box_2d": [590, 250, 640, 550] },
+  "manufacturer_name": { "value": "<company>", "raw_text": "<text>", "found": true, "box_2d": [100, 200, 180, 800] },
+  "manufacturer_address": { "value": "<address>", "raw_text": "<text>", "found": true, "box_2d": [180, 200, 240, 800] },
+  "mfg_date": { "value": "04/2026", "raw_text": "MFG. DATE: 04/2026", "found": true, "box_2d": [690, 250, 735, 550] },
+  "expiry_date": { "value": "09/2027", "raw_text": "EXPIRY DATE: 09/2027", "found": true, "box_2d": [735, 250, 780, 550] },
+  "consumer_care": { "value": "1800 102 7382", "raw_text": "Consumer Care: 1800 102 7382", "found": true, "box_2d": [240, 200, 300, 800] },
+  "fssai_number": { "value": "10012022000123", "raw_text": "FSSAI Lic. No. 10012022000123", "found": true, "box_2d": [880, 250, 930, 550] },
+  "country_of_origin": { "value": "India", "raw_text": "Made in India", "found": true, "box_2d": null },
+  "barcode": { "value": "8901234567890", "raw_text": "8 901234 567890", "found": true, "box_2d": [890, 250, 970, 480] }
 }
-
-IMPORTANT: Return strictly valid JSON only with no markdown wrapping.
 """
 
 
-def validate_ean13_checksum(barcode_str: str) -> dict:
-    """Validate EAN-13 barcode checksum and check GS1 prefix (890 = India)."""
-    if not barcode_str or not barcode_str.isdigit():
-        return {"valid_checksum": False, "gs1_country": "Unknown", "is_indian_gs1": False}
+def process_image_to_part(image_bytes: bytes) -> types.Part:
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        max_size = 1024
+        if max(img.size) > max_size:
+            ratio = max_size / max(img.size)
+            new_size = tuple(int(dim * ratio) for dim in img.size)
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-    digits = [int(c) for c in barcode_str]
-
-    if len(digits) == 13:
-        odd_sum = sum(digits[i] for i in range(0, 12, 2))
-        even_sum = sum(digits[i] for i in range(1, 12, 2))
-        total = odd_sum + (even_sum * 3)
-        checksum = (10 - (total % 10)) % 10
-        valid_checksum = (checksum == digits[12])
-    else:
-        valid_checksum = False
-
-    prefix = barcode_str[:3] if len(barcode_str) >= 3 else ""
-    is_indian_gs1 = (prefix == "890")
-
-    country_map = {
-        "890": "India (GS1 India)",
-        "690": "China", "691": "China", "692": "China", "693": "China", "694": "China", "695": "China",
-        "000": "USA / Canada", "001": "USA / Canada", "002": "USA / Canada",
-        "500": "United Kingdom", "400": "Germany", "490": "Japan"
-    }
-    gs1_country = country_map.get(prefix, f"Country Prefix ({prefix})")
-
-    return {
-        "valid_checksum": valid_checksum,
-        "gs1_prefix": prefix,
-        "gs1_country": gs1_country,
-        "is_indian_gs1": is_indian_gs1
-    }
-
-
-def process_image(image_bytes: bytes) -> Image.Image:
-    img = Image.open(io.BytesIO(image_bytes))
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
-    max_size = 1024
-    if max(img.size) > max_size:
-        ratio = max_size / max(img.size)
-        new_size = tuple(int(dim * ratio) for dim in img.size)
-        img = img.resize(new_size, Image.Resampling.LANCZOS)
-    return img
+        buf = io.BytesIO()
+        img.save(buf, format='JPEG', quality=90)
+        return types.Part.from_bytes(data=buf.getvalue(), mime_type='image/jpeg')
+    except Exception as e:
+        logger.warning(f"Image preprocessing note: {e}")
+        return types.Part.from_bytes(data=image_bytes, mime_type='image/jpeg')
 
 
 def clean_json_response(response_text: str) -> dict:
-    response_text = response_text.strip()
-    if response_text.startswith('```json'):
-        response_text = response_text[7:]
-    elif response_text.startswith('```'):
-        response_text = response_text[3:]
-    if response_text.endswith('```'):
-        response_text = response_text[:-3]
-    return json.loads(response_text.strip())
+    text = response_text.strip()
+    if text.startswith('```json'):
+        text = text[7:]
+    elif text.startswith('```'):
+        text = text[:-3]
+    if text.endswith('```'):
+        text = text[:-3]
 
+    json_match = re.search(r'(\{.*\})', text, re.DOTALL)
+    if json_match:
+        text = json_match.group(1)
 
-def fallback_offline_extraction(processed_images: list) -> dict:
-    """
-    Edge-AI Offline Fallback using local Ollama (llava).
-    """
-    logger.warning("⚡ Entering PROVISIONAL_OFFLINE Mode (Local Edge-AI via Ollama)")
-
-    ollama_url = "[http://127.0.0.1:11434/api/generate](http://127.0.0.1:11434/api/generate)"
-
-    try:
-        buffered = io.BytesIO()
-        processed_images[0].save(buffered, format="JPEG")
-        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-
-        payload = {
-            "model": "llava",
-            "prompt": OFFLINE_EXTRACTION_PROMPT,
-            "images": [img_base64],
-            "stream": False,
-            "format": "json"
-        }
-
-        response = requests.post(ollama_url, json=payload, timeout=180)
-
-        if response.status_code == 200:
-            result_json = response.json().get("response", "{}")
-            extracted_fields = clean_json_response(result_json)
-
-            product_category = extracted_fields.pop('product_category', 'General Packaged Commodity')
-            is_food_or_perishable = extracted_fields.pop('is_food_or_perishable', False)
-            requires_fssai = extracted_fields.pop('requires_fssai', False)
-            product_name = extracted_fields.pop('product_name', 'Scanned Commodity (Local Edge AI)')
-
-            barcode_data = extracted_fields.get('barcode', {})
-            barcode_str = str(barcode_data.get('value', '')) if barcode_data else ""
-            barcode_analysis = validate_ean13_checksum(barcode_str)
-
-            return {
-                "success": True,
-                "source_mode": "PROVISIONAL_OFFLINE",
-                "model_used": "Local Edge-AI (LLaVA)",
-                "is_offline": True,
-                "extracted_fields": extracted_fields,
-                "product_category": product_category,
-                "product_name": product_name,
-                "is_food_or_perishable": is_food_or_perishable,
-                "requires_fssai": requires_fssai,
-                "barcode_analysis": barcode_analysis,
-                "confidence_score": 0.88,
-                "readability_analysis": {
-                    "pdp_area_category": "100-500cm2",
-                    "min_required_font_mm": 2.5,
-                    "estimated_actual_font_mm": 2.5,
-                    "font_size_compliant": True,
-                    "contrast_compliant": True,
-                    "readability_score": 90,
-                    "readability_remarks": "Provisional evaluation via local edge vision model."
-                }
-            }
-    except Exception as e:
-        logger.error(f"Local Ollama connection error: {e}")
-
-    return {
-        "success": False,
-        "error": f"Local Ollama server is not running or unreachable at {ollama_url}.",
-        "is_offline": True
-    }
+    return json.loads(text.strip())
 
 
 def extract_from_multiple_images(images_bytes_list: list) -> dict:
@@ -330,16 +118,20 @@ def extract_from_multiple_images(images_bytes_list: list) -> dict:
     if not client:
         init_gemini()
 
+    if not client:
+        return {"success": False, "error": "Gemini API client not initialized.", "extracted_fields": None}
+
     if not images_bytes_list:
-        return {"success": False, "error": "Empty image input list", "extracted_fields": None}
+        return {"success": False, "error": "No image bytes provided", "extracted_fields": None}
 
-    processed_images = [process_image(b) for b in images_bytes_list[:5]]
+    image_parts = [process_image_to_part(b) for b in images_bytes_list[:5]]
+    last_error = "Unknown API Error"
 
-    if client:
-        for model_name in MODELS_TO_TRY:
+    for model_name in MODELS_TO_TRY:
+        for attempt in range(2):
             try:
-                logger.info(f"➜ Running cloud perception using model: {model_name}")
-                contents = [ONLINE_EXTRACTION_PROMPT] + processed_images
+                logger.info(f"➜ Running Gemini extraction (attempt {attempt+1}) using model: {model_name}")
+                contents = [ONLINE_EXTRACTION_PROMPT] + image_parts
 
                 response = client.models.generate_content(
                     model=model_name,
@@ -347,48 +139,49 @@ def extract_from_multiple_images(images_bytes_list: list) -> dict:
                     config=types.GenerateContentConfig(
                         temperature=0.1,
                         max_output_tokens=8192,
+                        response_mime_type="application/json"
                     )
                 )
 
                 response_text = getattr(response, 'text', '') or ""
                 extracted_fields = clean_json_response(response_text)
 
-                product_category = extracted_fields.pop('product_category', 'Other')
-                is_food_or_perishable = extracted_fields.pop('is_food_or_perishable', True)
-                requires_fssai = extracted_fields.pop('requires_fssai', False)
-                product_name = extracted_fields.pop('product_name', 'Unknown Product')
-                readability_analysis = extracted_fields.pop('readability_analysis', {})
+                prod_name = extracted_fields.pop('product_name', 'Scanned Packaging') or 'Scanned Packaging'
+                prod_cat = extracted_fields.pop('product_category', 'General Packaged Commodity') or 'General Packaged Commodity'
+                req_fssai = bool(extracted_fields.pop('requires_fssai', 'Food' in prod_cat))
+                req_expiry = bool(extracted_fields.pop('requires_expiry', 'Food' in prod_cat or 'Cosmetic' in prod_cat))
+                is_imported = bool(extracted_fields.pop('is_imported', False))
 
-                # Ensure box_2d coordinates within fields are preserved for frontend rendering
-                for field_key in ['mrp', 'net_quantity', 'manufacturer_name', 'manufacturer_address', 'mfg_date', 'expiry_date', 'country_of_origin', 'consumer_care', 'fssai_number', 'barcode']:
-                    if field_key in extracted_fields and isinstance(extracted_fields[field_key], dict):
-                        pass
-
-                barcode_data = extracted_fields.get('barcode', {})
-                barcode_str = str(barcode_data.get('value', '')) if barcode_data else ""
-                barcode_analysis = validate_ean13_checksum(barcode_str)
+                logger.info(f"✅ Extracted category [{prod_cat}] (FSSAI={req_fssai}, Expiry={req_expiry}) via [{model_name}]")
 
                 return {
                     "success": True,
-                    "source_mode": "ONLINE_API",
+                    "source_mode": "LIVE_GEMINI_API",
                     "model_used": model_name,
-                    "is_offline": False,
                     "extracted_fields": extracted_fields,
-                    "product_category": product_category,
-                    "product_name": product_name,
-                    "is_food_or_perishable": is_food_or_perishable,
-                    "requires_fssai": requires_fssai,
-                    "barcode_analysis": barcode_analysis,
-                    "confidence_score": 0.95,
-                    "readability_analysis": readability_analysis
+                    "product_name": prod_name,
+                    "product_category": prod_cat,
+                    "requires_fssai": req_fssai,
+                    "requires_expiry": req_expiry,
+                    "is_imported": is_imported,
+                    "confidence_score": 0.98
                 }
 
             except Exception as e:
-                logger.warning(f"✗ {model_name} failed: {str(e)[:120]}")
-                time.sleep(1)
-                continue
+                last_error = str(e)
+                if "503" in last_error or "429" in last_error:
+                    backoff = (attempt + 1) * 1.5
+                    logger.warning(f"⚠️ Model [{model_name}] traffic spike ({last_error[:60]}). Waiting {backoff}s...")
+                    time.sleep(backoff)
+                else:
+                    logger.warning(f"⚠️ Model [{model_name}] skipped: {last_error[:120]}")
+                    break
 
-    return fallback_offline_extraction(processed_images)
+    return {
+        "success": False,
+        "error": f"Live Gemini API failed across all models. Last error: {last_error}",
+        "extracted_fields": None
+    }
 
 
 def extract_from_image(image_bytes: bytes) -> dict:

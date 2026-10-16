@@ -49,14 +49,14 @@ export default function OfficerDashboard() {
     };
   }, []);
 
-  // Fetch history
+  // Fetch audit history
   useEffect(() => {
     const fetchHistory = async () => {
       try {
         const data = await officerHistory({ search: searchTerm, compliance: complianceFilter });
         setHistory(Array.isArray(data) ? data : []);
       } catch (err) {
-        console.error('Failed to fetch history', err);
+        console.error('Failed to fetch audit history:', err);
         setHistory([]);
       }
     };
@@ -122,7 +122,7 @@ export default function OfficerDashboard() {
       }
       setAuditResult(result);
     } catch (err) {
-      setError('Backend connection failed or parsing error.');
+      setError('Backend connection failed or audit parsing error.');
     } finally {
       setIsAnalyzing(false);
     }
@@ -139,11 +139,11 @@ export default function OfficerDashboard() {
       a.click();
       window.URL.revokeObjectURL(url);
     } catch (err) {
-      alert('Failed to generate or download challan.');
+      alert('Failed to generate or download official PDF challan.');
     }
   };
 
-  // Helper to compute dynamic bounding box style from Gemini's [ymin, xmin, ymax, xmax] 0-1000 scale
+  // Converts Gemini box_2d normalized [ymin, xmin, ymax, xmax] (0-1000 scale) to percentage CSS
   const getDynamicBoxStyle = (box2d) => {
     if (!box2d || !Array.isArray(box2d) || box2d.length !== 4) return null;
     const [ymin, xmin, ymax, xmax] = box2d;
@@ -164,7 +164,7 @@ export default function OfficerDashboard() {
       productName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       brandName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       locationName.toLowerCase().includes(searchTerm.toLowerCase());
-    
+
     const matchesFilter = complianceFilter === 'all' || item.compliance === complianceFilter;
     return matchesSearch && matchesFilter;
   });
@@ -183,26 +183,43 @@ export default function OfficerDashboard() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-slate-900">Officer Workbench</h1>
-                <p className="text-xs text-slate-500">Legal Metrology Enforcement</p>
+                <p className="text-xs text-slate-500">Legal Metrology Enforcement Dashboard</p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+              <div
+                className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 ${
+                  isOnline ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                }`}
+              >
                 <span className={`w-2 h-2 rounded-full ${isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`}></span>
                 {isOnline ? 'Online - Live Sync' : 'Offline - Local Queue Active'}
               </div>
-              <button onClick={officerLogout} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition flex items-center gap-1">
+              <button
+                onClick={officerLogout}
+                className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 transition flex items-center gap-1"
+              >
                 <LogOut className="w-3.5 h-3.5" /> Logout
               </button>
             </div>
           </div>
 
           <div className="mt-4 flex gap-2">
-            <button onClick={() => setActiveTab('audit')} className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${activeTab === 'audit' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+            <button
+              onClick={() => setActiveTab('audit')}
+              className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'audit' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
               🔍 Active Audit
             </button>
-            <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${activeTab === 'history' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-4 py-2 rounded-lg font-semibold text-sm transition ${
+                activeTab === 'history' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              }`}
+            >
               📊 History & Analytics
             </button>
           </div>
@@ -221,54 +238,89 @@ export default function OfficerDashboard() {
                 {images.length === 0 ? (
                   <div className="border-2 border-dashed border-slate-300 rounded-xl p-10 text-center hover:border-blue-500 transition">
                     <Camera className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                    <p className="text-slate-600 mb-2">Capture or upload package images for spatial OCR recognition</p>
+                    <p className="text-slate-600 mb-2">Capture or upload package images for vision AI label verification</p>
                     <div className="flex flex-wrap justify-center gap-4 mt-4">
-                      <button onClick={() => fileInputRef.current?.click()} className="bg-blue-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center gap-2">
+                      <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="bg-blue-600 text-white px-5 py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center gap-2"
+                      >
                         <Camera className="w-5 h-5" /> Single Upload
                       </button>
-                      <button onClick={() => multiFileInputRef.current?.click()} className="bg-white border-2 border-blue-600 text-blue-700 px-5 py-3 rounded-xl font-semibold hover:bg-blue-50 transition flex items-center gap-2">
+                      <button
+                        onClick={() => multiFileInputRef.current?.click()}
+                        className="bg-white border-2 border-blue-600 text-blue-700 px-5 py-3 rounded-xl font-semibold hover:bg-blue-50 transition flex items-center gap-2"
+                      >
                         <Layers className="w-5 h-5" /> Multi-Image Upload
                       </button>
                     </div>
-                    <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={(e) => handleFilesSelected(e, false)} className="hidden" />
-                    <input ref={multiFileInputRef} type="file" accept="image/*" multiple onChange={(e) => handleFilesSelected(e, true)} className="hidden" />
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => handleFilesSelected(e, false)}
+                      className="hidden"
+                    />
+                    <input
+                      ref={multiFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={(e) => handleFilesSelected(e, true)}
+                      className="hidden"
+                    />
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-black/90 p-2 flex justify-center">
-                      <div className="relative inline-block">
-                        <img src={images[0]} alt="Spatial OCR Target" className="max-h-80 object-contain mx-auto block" />
-                        
-                        {/* Dynamic Bounding Box for MRP */}
-                        {auditResult?.extracted_fields?.mrp?.box_2d && getDynamicBoxStyle(auditResult.extracted_fields.mrp.box_2d) && (
-                          <div 
-                            className="absolute border-2 border-emerald-400 bg-emerald-400/20 px-1 text-[10px] text-emerald-200 font-mono pointer-events-none"
-                            style={getDynamicBoxStyle(auditResult.extracted_fields.mrp.box_2d)}
-                          >
-                            MRP [Detected]
-                          </div>
-                        )}
+                      <div className="relative inline-block w-full">
+                        <img src={images[0]} alt="Packaging Label Scan" className="max-h-96 object-contain mx-auto block w-full" />
 
-                        {/* Dynamic Bounding Box for Net Quantity */}
-                        {auditResult?.extracted_fields?.net_quantity?.box_2d && getDynamicBoxStyle(auditResult.extracted_fields.net_quantity.box_2d) && (
-                          <div 
-                            className="absolute border-2 border-blue-400 bg-blue-400/20 px-1 text-[10px] text-blue-200 font-mono pointer-events-none"
-                            style={getDynamicBoxStyle(auditResult.extracted_fields.net_quantity.box_2d)}
-                          >
-                            Net Qty [Detected]
-                          </div>
-                        )}
+                        {/* Interactive Spatial Bounding Overlay for All Extracted Fields */}
+                        {auditResult?.extracted_fields &&
+                          Object.entries(auditResult.extracted_fields).map(([key, field]) => {
+                            if (!field?.box_2d || !field?.found) return null;
+                            const style = getDynamicBoxStyle(field.box_2d);
+                            if (!style) return null;
+
+                            const isViolation = field.is_compliant === false;
+
+                            return (
+                              <div
+                                key={key}
+                                style={style}
+                                className={`absolute border-2 rounded transition-all duration-150 group hover:z-30 pointer-events-auto ${
+                                  isViolation
+                                    ? 'border-red-500 bg-red-500/20 shadow-[0_0_8px_rgba(239,68,68,0.6)]'
+                                    : 'border-emerald-400 bg-emerald-400/20 shadow-[0_0_8px_rgba(16,185,129,0.5)]'
+                                }`}
+                              >
+                                <span className="absolute -top-7 left-0 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow-md pointer-events-none whitespace-nowrap z-40">
+                                  <span className={isViolation ? 'text-red-400' : 'text-emerald-400'}>
+                                    {key.replace(/_/g, ' ').toUpperCase()}
+                                  </span>
+                                  : {field.value || field.raw_text || 'Detected'}
+                                </span>
+                              </div>
+                            );
+                          })}
                       </div>
                     </div>
 
                     {isAnalyzing && (
                       <div className="bg-slate-900/80 rounded-xl p-4 text-center">
                         <div className="animate-spin w-8 h-8 border-4 border-white border-t-transparent rounded-full mx-auto mb-2"></div>
-                        <p className="text-white font-semibold text-sm">Running spatial box OCR calibration...</p>
+                        <p className="text-white font-semibold text-sm">Running vision AI OCR extraction & rule validation...</p>
                       </div>
                     )}
 
-                    <button onClick={() => { setImages([]); setAuditResult(null); }} className="w-full bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition text-sm">
+                    <button
+                      onClick={() => {
+                        setImages([]);
+                        setAuditResult(null);
+                      }}
+                      className="w-full bg-white border border-slate-300 py-2 rounded-lg font-semibold hover:bg-slate-50 transition text-sm text-slate-700"
+                    >
                       Clear & Reset Audit Images
                     </button>
                   </div>
@@ -281,9 +333,9 @@ export default function OfficerDashboard() {
                     <MapPin className="w-5 h-5 text-red-600" />
                     <div>
                       <p className="text-xs text-slate-500">Live Inspection GPS Coordinate</p>
-                      <a 
-                        href={`https://www.google.com/maps?q=${location.lat},${location.lng}`} 
-                        target="_blank" 
+                      <a
+                        href={`https://www.google.com/maps?q=${location.lat},${location.lng}`}
+                        target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm font-bold text-blue-600 hover:underline flex items-center gap-1"
                       >
@@ -297,7 +349,7 @@ export default function OfficerDashboard() {
 
               {auditResult && (
                 <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
-                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Extracted Compliance Parameters</h2>
+                  <h2 className="text-lg font-semibold text-slate-900 mb-4">Extracted Statutory Parameters</h2>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">MRP</p>
@@ -323,10 +375,16 @@ export default function OfficerDashboard() {
 
               {auditResult && (
                 <div className="flex gap-3">
-                  <button onClick={() => alert('Saved to local inspector queue!')} className="flex-1 bg-gray-600 text-white py-3 rounded-xl font-semibold hover:bg-gray-700 transition flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => alert('Saved to inspector queue for cloud sync!')}
+                    className="flex-1 bg-gray-600 text-white py-3 rounded-xl font-semibold hover:bg-gray-700 transition flex items-center justify-center gap-2"
+                  >
                     <Save className="w-5 h-5" /> Save Queue
                   </button>
-                  <button onClick={() => setShowChallanModal(true)} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                  <button
+                    onClick={() => setShowChallanModal(true)}
+                    className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-semibold hover:bg-blue-700 transition flex items-center justify-center gap-2"
+                  >
                     <FileCheck className="w-5 h-5" /> Generate PDF Challan
                   </button>
                 </div>
@@ -344,7 +402,10 @@ export default function OfficerDashboard() {
                     </div>
                     <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-center">
                       <span className="text-2xl font-extrabold text-red-700">
-                        ₹ {auditResult.challan_amount || auditResult.estimated_penalty_inr ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN') : '0'}
+                        ₹{' '}
+                        {auditResult.challan_amount || auditResult.estimated_penalty_inr
+                          ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN')
+                          : '0'}
                       </span>
                       <p className="text-xs font-semibold text-red-600 mt-1">Challan Fine Amount</p>
                     </div>
@@ -353,13 +414,16 @@ export default function OfficerDashboard() {
                   <div className="space-y-3">
                     {auditResult.violations?.map((v, idx) => (
                       <div key={idx} className="p-3 bg-red-50 rounded-lg flex items-start gap-2">
-                        <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" />
+                        <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5 shrink-0" />
                         <div>
                           <p className="text-sm font-semibold text-slate-900">{v.message}</p>
-                          <span className="text-xs text-slate-500">{v.rule_code}</span>
+                          <span className="text-xs text-slate-500 font-mono">{v.rule_code}</span>
                         </div>
                       </div>
                     ))}
+                    {(!auditResult.violations || auditResult.violations.length === 0) && (
+                      <p className="text-sm text-emerald-600 font-medium">✓ Product label complies with Legal Metrology (Packaged Commodities) Rules.</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -369,7 +433,12 @@ export default function OfficerDashboard() {
           <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <StatCard icon={TrendingUp} label="Total Audits" value={history.length} color="blue" />
-              <StatCard icon={AlertTriangle} label="Violations Flagged" value={history.filter(h => h.compliance === 'VIOLATION' || h.is_compliant === false).length} color="red" />
+              <StatCard
+                icon={AlertTriangle}
+                label="Violations Flagged"
+                value={history.filter((h) => h.compliance === 'VIOLATION' || h.is_compliant === false).length}
+                color="red"
+              />
               <StatCard icon={Users} label="Active Inspector Queue" value="Live" color="yellow" />
             </div>
 
@@ -377,13 +446,19 @@ export default function OfficerDashboard() {
               <div className="flex gap-4 mb-4">
                 <div className="flex-1 relative">
                   <Search className="w-5 h-5 absolute left-3 top-3 text-slate-400" />
-                  <input type="text" placeholder="Search audits..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 border rounded-lg" />
+                  <input
+                    type="text"
+                    placeholder="Search audits by product, brand, or location..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="border-b">
+                    <tr className="border-b bg-slate-50">
                       <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Product</th>
                       <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Compliance</th>
                       <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase">Location</th>
@@ -395,20 +470,34 @@ export default function OfficerDashboard() {
                     {filteredHistory.map((item, idx) => {
                       const itemLat = item.latitude || item.lat;
                       const itemLng = item.longitude || item.lng;
-                      const itemDate = item.date || item.timestamp ? new Date(item.timestamp || item.date).toLocaleString() : 'Just now';
+                      const itemDate =
+                        item.date || item.timestamp ? new Date(item.timestamp || item.date).toLocaleString() : 'Just now';
                       const recordId = item.id || item.scan_id || idx;
 
                       return (
                         <tr key={recordId} className="border-b hover:bg-slate-50">
-                          <td className="py-3 px-4 text-sm font-medium">{item.product_name || item.product || 'Packaged Commodity'}</td>
+                          <td className="py-3 px-4 text-sm font-medium text-slate-900">
+                            {item.product_name || item.product || 'Packaged Commodity'}
+                          </td>
                           <td className="py-3 px-4">
-                            <span className={`px-2 py-1 text-xs rounded-full font-semibold ${item.compliance === 'PASS' || item.is_compliant ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                            <span
+                              className={`px-2 py-1 text-xs rounded-full font-semibold ${
+                                item.compliance === 'PASS' || item.is_compliant
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-red-100 text-red-700'
+                              }`}
+                            >
                               {item.compliance || (item.is_compliant ? 'PASS' : 'VIOLATION')}
                             </span>
                           </td>
                           <td className="py-3 px-4 text-sm text-slate-600">
                             {itemLat && itemLng ? (
-                              <a href={`https://www.google.com/maps?q=${itemLat},${itemLng}`} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline flex items-center gap-1 font-medium">
+                              <a
+                                href={`https://www.google.com/maps?q=${itemLat},${itemLng}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline flex items-center gap-1 font-medium"
+                              >
                                 <MapPin className="w-4 h-4 text-red-500" /> View Map ↗
                               </a>
                             ) : (
@@ -451,7 +540,7 @@ export default function OfficerDashboard() {
             >
               <X className="w-5 h-5" />
             </button>
-            
+
             <h3 className="text-xl font-bold mb-4 pr-8 text-slate-900 border-b pb-2">
               Statutory Inspection Challan
             </h3>
@@ -460,7 +549,7 @@ export default function OfficerDashboard() {
               <div className="bg-slate-50 rounded-lg p-4 grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-xs text-slate-500">Product Audited</p>
-                  <p className="font-semibold text-slate-900">{auditResult.product_name || auditResult.product}</p>
+                  <p className="font-semibold text-slate-900">{auditResult.product_name || auditResult.product || 'Scanned Commodity'}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500">Compliance Score</p>
@@ -468,14 +557,25 @@ export default function OfficerDashboard() {
                 </div>
               </div>
 
-              {/* Readability & Font Metrics Section */}
+              {/* Readability Metrics Section */}
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
                 <h4 className="font-semibold text-blue-900 text-sm mb-2">🔠 OCR Readability & Font Analysis</h4>
                 <div className="grid grid-cols-2 gap-2 text-xs text-blue-800">
-                  <div>Readability Index: <span className="font-bold">{auditResult.readability_metrics?.readability_score ?? 100}%</span></div>
-                  <div>Min Font Size: <span className="font-bold">{auditResult.readability_metrics?.font_size_pt ?? 3.5} pt</span></div>
-                  <div>Contrast Clarity: <span className="font-bold">{auditResult.readability_metrics?.contrast_score ?? 90}%</span></div>
-                  <div>Font Rule 7 Check: <span className="font-bold">{auditResult.readability_metrics?.is_font_compliant ? 'Pass' : 'Substandard'}</span></div>
+                  <div>
+                    Readability Index: <span className="font-bold">{auditResult.readability_metrics?.readability_score ?? 100}%</span>
+                  </div>
+                  <div>
+                    Min Font Size: <span className="font-bold">{auditResult.readability_metrics?.font_size_pt ?? 3.5} pt</span>
+                  </div>
+                  <div>
+                    Contrast Clarity: <span className="font-bold">{auditResult.readability_metrics?.contrast_score ?? 90}%</span>
+                  </div>
+                  <div>
+                    Font Rule 7 Check:{' '}
+                    <span className="font-bold">
+                      {auditResult.readability_metrics?.is_font_compliant ? 'Pass' : 'Substandard'}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -483,7 +583,10 @@ export default function OfficerDashboard() {
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-center">
                 <p className="text-xs font-semibold text-red-600 uppercase tracking-wider">Compoundable Fine / Challan Amount</p>
                 <p className="text-3xl font-extrabold text-red-700 mt-1">
-                  ₹ {auditResult.challan_amount || auditResult.estimated_penalty_inr ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN') : '0'}
+                  ₹{' '}
+                  {auditResult.challan_amount || auditResult.estimated_penalty_inr
+                    ? (auditResult.challan_amount || auditResult.estimated_penalty_inr).toLocaleString('en-IN')
+                    : '0'}
                 </p>
                 <p className="text-[11px] text-red-500 mt-1">Calculated per Legal Metrology Act compounding guidelines</p>
               </div>
@@ -525,11 +628,11 @@ export default function OfficerDashboard() {
 function StatCard({ icon: Icon, label, value, color }) {
   const colors = { blue: 'bg-blue-100 text-blue-700', red: 'bg-red-100 text-red-700', yellow: 'bg-yellow-100 text-yellow-700' };
   return (
-    <div className="bg-white rounded-2xl p-6 shadow-lg border">
+    <div className="bg-white rounded-2xl p-6 shadow-lg border border-slate-200">
       <div className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl mb-3 ${colors[color]}`}>
         <Icon className="w-6 h-6" />
       </div>
-      <p className="text-3xl font-bold">{value}</p>
+      <p className="text-3xl font-bold text-slate-900">{value}</p>
       <p className="text-sm text-slate-500">{label}</p>
     </div>
   );

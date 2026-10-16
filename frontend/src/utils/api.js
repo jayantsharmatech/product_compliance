@@ -1,7 +1,10 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'https://3.109.159.235.nip.io';
-const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
+// Dynamically connect to local FastAPI backend (or env override)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+
+// Default mock mode to FALSE so live API calls reach your backend
+const USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -44,7 +47,7 @@ export const scanMultipleImages = async (imageFiles, latitude = null, longitude 
   }
   if (locationName) formData.append('location_name', locationName);
 
-  const response = await api.post('/scan-multiple', formData, {
+  const response = await api.post('/scan-multi', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return response.data;
@@ -53,7 +56,7 @@ export const scanMultipleImages = async (imageFiles, latitude = null, longitude 
 export const citizenHistory = async () => {
   if (USE_MOCK) return [];
   const response = await api.get('/history');
-  return response.data.scans || response.data || [];
+  return response.data.records || response.data.scans || response.data || [];
 };
 
 export const submitComplaint = async (complaintData) => {
@@ -74,7 +77,7 @@ export const officerAudit = async (imageFileOrFiles, latitude = null, longitude 
 
   if (Array.isArray(imageFileOrFiles)) {
     imageFileOrFiles.forEach((file) => formData.append('files', file));
-    const response = await api.post('/scan-multiple', formData, {
+    const response = await api.post('/scan-multi', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return response.data;
@@ -90,7 +93,7 @@ export const officerAudit = async (imageFileOrFiles, latitude = null, longitude 
 export const officerHistory = async (filters = {}) => {
   if (USE_MOCK) return [];
   const response = await api.get('/history', { params: filters });
-  return response.data.scans || response.data || [];
+  return response.data.records || response.data.scans || response.data || [];
 };
 
 export const generateChallan = async (auditId) => {
