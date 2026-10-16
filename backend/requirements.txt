@@ -14,3 +14,4 @@ pillow>=10.2.0
 opencv-python-headless>=4.9.0.80
 reportlab>=4.1.0
 python-multipart>=0.0.9
+requests
