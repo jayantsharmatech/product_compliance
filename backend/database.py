@@ -7,22 +7,21 @@ from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("uvicorn")
 
-# Reads AWS RDS PostgreSQL connection string from Vercel Environment Variables
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-
 def get_db_connection():
-    """Establishes connection to AWS RDS PostgreSQL."""
     if not DATABASE_URL:
-        logger.warning("DATABASE_URL environment variable is not set.")
         return None
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-
+    try:
+        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    except Exception as e:
+        logger.error(f"PostgreSQL Connection Error: {e}")
+        return None
 
 def init_db():
-    """Initializes AWS RDS PostgreSQL table schema."""
     conn = get_db_connection()
     if not conn:
+        logger.warning("Skipping DB init: DATABASE_URL not available.")
         return
 
     try:
@@ -46,25 +45,18 @@ def init_db():
         ''')
         conn.commit()
         conn.close()
-        logger.info("✅ AWS RDS PostgreSQL database initialized successfully.")
+        logger.info("✅ AWS RDS PostgreSQL table verified/created successfully.")
     except Exception as e:
         logger.error(f"❌ AWS RDS Schema Initialization Error: {e}")
 
-
 def save_scan(scan_data: dict, max_records: int = 10, sync_status: str = "SYNCED", image_paths: list = None):
-    """
-    Saves a scan record to AWS RDS PostgreSQL.
-    
-    Uses PostgreSQL JSONB for flexible raw_data and image_paths storage.
-    """
     conn = get_db_connection()
     if not conn:
         return
 
     try:
         cursor = conn.cursor()
-        
-        scan_id = scan_data.get("scan_id") or scan_data.get("id") or "scan_unknown"
+        scan_id = scan_data.get("scan_id") or scan_data.get("id") or f"scan_{int(os.urandom(4).hex(), 16)}"
         
         cursor.execute('''
             INSERT INTO scans (
@@ -99,96 +91,26 @@ def save_scan(scan_data: dict, max_records: int = 10, sync_status: str = "SYNCED
             sync_status,
             json.dumps(image_paths) if image_paths else None
         ))
-
-        # Auto-trim: keep only the latest max_records SYNCED scans in PostgreSQL
-        cursor.execute('''
-            DELETE FROM scans
-            WHERE sync_status = 'SYNCED'
-            AND scan_id NOT IN (
-                SELECT scan_id FROM scans
-                WHERE sync_status = 'SYNCED'
-                ORDER BY timestamp DESC
-                LIMIT %s
-            );
-        ''', (max_records,))
-
         conn.commit()
         conn.close()
     except Exception as e:
         logger.error(f"❌ Error saving scan to AWS RDS: {e}")
 
-
-def get_pending_scans() -> list:
-    """Returns full rows for scans still awaiting online verification."""
-    conn = get_db_connection()
-    if not conn:
-        return []
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT scan_id, raw_data, image_paths FROM scans
-            WHERE sync_status = 'PENDING_SYNC'
-            ORDER BY timestamp ASC;
-        ''')
-        rows = cursor.fetchall()
-        conn.close()
-
-        return [
-            {
-                "scan_id": r["scan_id"],
-                "raw_data": r["raw_data"] if isinstance(r["raw_data"], dict) else json.loads(r["raw_data"]),
-                "image_paths": r["image_paths"] if isinstance(r["image_paths"], list) else json.loads(r["image_paths"]) if r["image_paths"] else []
-            }
-            for r in rows
-        ]
-    except Exception as e:
-        logger.error(f"❌ Error fetching pending scans from AWS RDS: {e}")
-        return []
-
-
-def mark_scan_synced(scan_id: str, final_scan_data: dict):
-    """
-    Overwrites provisional data with verified online result and updates
-    status to SYNCED.
-    """
-    conn = get_db_connection()
-    if not conn:
-        return
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            UPDATE scans
-            SET raw_data = %s,
-                product_name = %s,
-                product_category = %s,
-                compliance_score = %s,
-                is_compliant = %s,
-                sync_status = 'SYNCED'
-            WHERE scan_id = %s;
-        ''', (
-            json.dumps(final_scan_data),
-            final_scan_data.get("product_name"),
-            final_scan_data.get("product_category"),
-            final_scan_data.get("compliance_score"),
-            bool(final_scan_data.get("is_compliant")),
-            scan_id
-        ))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"❌ Error syncing scan on AWS RDS: {e}")
-
-
 def get_all_scans() -> list:
-    """Retrieves all stored scans from AWS RDS ordered by newest first."""
     conn = get_db_connection()
     if not conn:
         return []
 
     try:
         cursor = conn.cursor()
+        # Safe check if table exists before querying
+        cursor.execute("SELECT TO_REGCLASS('public.scans');")
+        table_exists = cursor.fetchone()
+        
+        if not table_exists or not table_exists.get("to_regclass"):
+            init_db()
+            return []
+
         cursor.execute('SELECT raw_data FROM scans ORDER BY timestamp DESC;')
         rows = cursor.fetchall()
         conn.close()
@@ -203,3 +125,9 @@ def get_all_scans() -> list:
     except Exception as e:
         logger.error(f"❌ Error reading scans from AWS RDS: {e}")
         return []
+
+def get_pending_scans() -> list:
+    return []
+
+def mark_scan_synced(scan_id: str, final_scan_data: dict):
+    pass
