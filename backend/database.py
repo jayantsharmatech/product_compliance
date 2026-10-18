@@ -1,19 +1,30 @@
 import os
 import json
 import logging
-from typing import List, Dict, Any
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger("uvicorn")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-
 def get_db_connection():
-    if not DATABASE_URL:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
         return None
+    
     try:
-        return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        # Strip any existing query parameters to avoid duplication conflicts
+        if "?" in database_url:
+            base_url = database_url.split("?")[0]
+        else:
+            base_url = database_url
+            
+        # Explicitly enforce sslmode='require' to satisfy AWS RDS security requirements
+        conn = psycopg2.connect(
+            base_url, 
+            sslmode='require',
+            cursor_factory=RealDictCursor
+        )
+        return conn
     except Exception as e:
         logger.error(f"PostgreSQL Connection Error: {e}")
         return None
@@ -21,113 +32,86 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     if not conn:
-        logger.warning("Skipping DB init: DATABASE_URL not available.")
+        logger.warning("Skipping DB init: DATABASE_URL not available or connection failed.")
         return
-
     try:
-        cursor = conn.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS scans (
-                scan_id VARCHAR(255) PRIMARY KEY,
-                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                product_name VARCHAR(255),
-                product_category VARCHAR(255),
-                compliance_score REAL,
-                is_compliant BOOLEAN,
-                location_name VARCHAR(255),
-                latitude REAL,
-                longitude REAL,
-                google_maps_url TEXT,
-                raw_data JSONB NOT NULL,
-                sync_status VARCHAR(50) DEFAULT 'SYNCED',
-                image_paths JSONB
-            );
-        ''')
-        conn.commit()
-        conn.close()
-        logger.info("✅ AWS RDS PostgreSQL table verified/created successfully.")
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS scans (
+                        scan_id VARCHAR(255) PRIMARY KEY,
+                        timestamp VARCHAR(255),
+                        product_name TEXT,
+                        brand_name TEXT,
+                        product_category TEXT,
+                        compliance_score FLOAT,
+                        is_compliant BOOLEAN,
+                        violations JSONB,
+                        compounding_fine_inr INT,
+                        location_name TEXT,
+                        raw_data JSONB
+                    );
+                """)
+        logger.info("Database tables initialized successfully.")
     except Exception as e:
-        logger.error(f"❌ AWS RDS Schema Initialization Error: {e}")
+        logger.error(f"Database initialization failed: {e}")
+    finally:
+        conn.close()
 
-def save_scan(scan_data: dict, max_records: int = 10, sync_status: str = "SYNCED", image_paths: list = None):
+def save_scan(scan_record: dict, image_paths: list = None):
     conn = get_db_connection()
     if not conn:
+        logger.warning("Database connection unavailable; scan record not persisted to DB.")
         return
-
     try:
-        cursor = conn.cursor()
-        scan_id = scan_data.get("scan_id") or scan_data.get("id") or f"scan_{int(os.urandom(4).hex(), 16)}"
-        
-        cursor.execute('''
-            INSERT INTO scans (
-                scan_id, product_name, product_category,
-                compliance_score, is_compliant, location_name,
-                latitude, longitude, google_maps_url, raw_data,
-                sync_status, image_paths
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (scan_id) DO UPDATE SET
-                product_name = EXCLUDED.product_name,
-                product_category = EXCLUDED.product_category,
-                compliance_score = EXCLUDED.compliance_score,
-                is_compliant = EXCLUDED.is_compliant,
-                location_name = EXCLUDED.location_name,
-                latitude = EXCLUDED.latitude,
-                longitude = EXCLUDED.longitude,
-                google_maps_url = EXCLUDED.google_maps_url,
-                raw_data = EXCLUDED.raw_data,
-                sync_status = EXCLUDED.sync_status,
-                image_paths = EXCLUDED.image_paths;
-        ''', (
-            scan_id,
-            scan_data.get("product_name"),
-            scan_data.get("product_category"),
-            scan_data.get("compliance_score"),
-            bool(scan_data.get("is_compliant")),
-            scan_data.get("location_name", "Location Unavailable"),
-            scan_data.get("latitude"),
-            scan_data.get("longitude"),
-            scan_data.get("google_maps_url", ""),
-            json.dumps(scan_data),
-            sync_status,
-            json.dumps(image_paths) if image_paths else None
-        ))
-        conn.commit()
-        conn.close()
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    INSERT INTO scans (
+                        scan_id, timestamp, product_name, brand_name, product_category, 
+                        compliance_score, is_compliant, violations, compounding_fine_inr, 
+                        location_name, raw_data
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (scan_id) DO UPDATE SET
+                        compliance_score = EXCLUDED.compliance_score,
+                        is_compliant = EXCLUDED.is_compliant,
+                        violations = EXCLUDED.violations,
+                        raw_data = EXCLUDED.raw_data;
+                """, (
+                    scan_record.get("scan_id"),
+                    scan_record.get("timestamp"),
+                    scan_record.get("product_name"),
+                    scan_record.get("brand_name"),
+                    scan_record.get("product_category"),
+                    scan_record.get("compliance_score"),
+                    scan_record.get("is_compliant"),
+                    json.dumps(scan_record.get("violations", [])),
+                    scan_record.get("compounding_fine_inr", 0),
+                    scan_record.get("location_name"),
+                    json.dumps(scan_record)
+                ))
     except Exception as e:
-        logger.error(f"❌ Error saving scan to AWS RDS: {e}")
+        logger.error(f"Failed to save scan to DB: {e}")
+    finally:
+        conn.close()
 
-def get_all_scans() -> list:
+def get_all_scans():
     conn = get_db_connection()
     if not conn:
         return []
-
     try:
-        cursor = conn.cursor()
-        # Safe check if table exists before querying
-        cursor.execute("SELECT TO_REGCLASS('public.scans');")
-        table_exists = cursor.fetchone()
-        
-        if not table_exists or not table_exists.get("to_regclass"):
-            init_db()
-            return []
-
-        cursor.execute('SELECT raw_data FROM scans ORDER BY timestamp DESC;')
-        rows = cursor.fetchall()
-        conn.close()
-
-        results = []
-        for row in rows:
-            record = row["raw_data"]
-            if isinstance(record, str):
-                record = json.loads(record)
-            results.append(record)
-        return results
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT raw_data FROM scans ORDER BY timestamp DESC;")
+                rows = cursor.fetchall()
+                return [row["raw_data"] for row in rows]
     except Exception as e:
-        logger.error(f"❌ Error reading scans from AWS RDS: {e}")
+        logger.error(f"Failed to fetch scans from DB: {e}")
         return []
 
-def get_pending_scans() -> list:
+def get_pending_scans():
     return []
 
-def mark_scan_synced(scan_id: str, final_scan_data: dict):
+def mark_scan_synced(scan_id: str, raw_data: dict):
     pass
