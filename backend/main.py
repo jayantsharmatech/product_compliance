@@ -233,69 +233,76 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         return b"%PDF-1.4 Mock Report - ReportLab not installed"
 
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-    story = []
-    styles = getSampleStyleSheet()
+    try:
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+        story = []
+        styles = getSampleStyleSheet()
 
-    title_style = ParagraphStyle(
-        'DocTitle',
-        parent=styles['Heading1'],
-        fontSize=18,
-        leading=22,
-        textColor=colors.HexColor("#1E3A8A"),
-        alignment=1
-    )
+        title_style = ParagraphStyle(
+            'DocTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            leading=22,
+            textColor=colors.HexColor("#1E3A8A"),
+            alignment=1
+        )
 
-    story.append(Paragraph("LEGAL METROLOGY INSPECTION CHALLAN", title_style))
-    story.append(Paragraph("Department of Consumer Affairs | Government of India", ParagraphStyle('Sub', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.gray)))
-    story.append(Spacer(1, 15))
+        story.append(Paragraph("LEGAL METROLOGY INSPECTION CHALLAN", title_style))
+        story.append(Paragraph("Department of Consumer Affairs | Government of India", ParagraphStyle('Sub', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.gray)))
+        story.append(Spacer(1, 15))
 
-    scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
-    timestamp = scan_data.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
+        timestamp = scan_data.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    info_data = [
-        [Paragraph("<b>Challan ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date/Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
-        [Paragraph("<b>Product:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_name", "N/A")), styles['Normal']), Paragraph("<b>Category:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_category", "N/A")), styles['Normal'])],
-        [Paragraph("<b>Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Score:</b>", styles['Normal']), Paragraph(f"{scan_data.get('compliance_score', 0)}%", styles['Normal'])],
-    ]
+        info_data = [
+            [Paragraph("<b>Challan ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date/Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
+            [Paragraph("<b>Product:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_name", "N/A")), styles['Normal']), Paragraph("<b>Category:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_category", "N/A")), styles['Normal'])],
+            [Paragraph("<b>Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Score:</b>", styles['Normal']), Paragraph(f"{scan_data.get('compliance_score', 0)}%", styles['Normal'])],
+        ]
 
-    t = Table(info_data, colWidths=[80, 180, 80, 180])
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-        ('PADDING', (0,0), (-1,-1), 6),
-    ]))
-    story.append(t)
-    story.append(Spacer(1, 15))
-
-    violations = scan_data.get("violations", [])
-    if violations:
-        story.append(Paragraph("<b>Statutory Violations & Fine Breakdown</b>", styles['Heading2']))
-        v_table_data = [["Rule Violation", "Statutory Clause", "Fine (INR)"]]
-        for v in violations:
-            v_table_data.append([
-                Paragraph(v.get("rule", ""), styles['Normal']),
-                Paragraph(v.get("penalty_clause", ""), styles['Normal']),
-                f"Rs. {v.get('max_fine', 0):,}"
-            ])
-        
-        v_table = Table(v_table_data, colWidths=[240, 180, 100])
-        v_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#FCA5A5")),
+        t = Table(info_data, colWidths=[80, 180, 80, 180])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
             ('PADDING', (0,0), (-1,-1), 6),
         ]))
-        story.append(v_table)
-        story.append(Spacer(1, 10))
+        story.append(t)
+        story.append(Spacer(1, 15))
 
-        compounding_fine = scan_data.get("compounding_fine_inr", 5000)
-        fine_text = f"<b>Total Compounding Amount (Sec 36(1) Cap):</b> Rs. {compounding_fine:,}"
-        story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor("#B91C1C"))))
-    else:
-        story.append(Paragraph("<b>Status:</b> FULLY COMPLIANT", ParagraphStyle('Comp', parent=styles['Normal'], fontSize=14, textColor=colors.HexColor("#15803D"))))
+        violations = scan_data.get("violations", [])
+        if violations:
+            story.append(Paragraph("<b>Statutory Violations & Fine Breakdown</b>", styles['Heading2']))
+            v_table_data = [["Rule Violation", "Statutory Clause", "Fine (INR)"]]
+            for v in violations:
+                v_table_data.append([
+                    Paragraph(str(v.get("rule", "")), styles['Normal']),
+                    Paragraph(str(v.get("penalty_clause", "")), styles['Normal']),
+                    f"Rs. {v.get('max_fine', 0):,}"
+                ])
+            
+            v_table = Table(v_table_data, colWidths=[240, 180, 100])
+            v_table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#FCA5A5")),
+                ('PADDING', (0,0), (-1,-1), 6),
+            ]))
+            story.append(v_table)
+            story.append(Spacer(1, 10))
 
-    doc.build(story)
+            compounding_fine = scan_data.get("compounding_fine_inr", 5000)
+            fine_text = f"<b>Total Compounding Amount (Sec 36(1) Cap):</b> Rs. {compounding_fine:,}"
+            story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor("#B91C1C"))))
+        else:
+            story.append(Paragraph("<b>Status:</b> FULLY COMPLIANT", ParagraphStyle('Comp', parent=styles['Normal'], fontSize=14, textColor=colors.HexColor("#15803D"))))
+
+        doc.build(story)
+    except Exception as e:
+        logger.error(f"PDF Generation Fallback Triggered: {e}")
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        story = [Paragraph(f"Legal Metrology Inspection Challan - ID: {scan_data.get('scan_id', 'N/A')}", styles['Heading1'])]
+        doc.build(story)
+
     buffer.seek(0)
     return buffer.getvalue()
 

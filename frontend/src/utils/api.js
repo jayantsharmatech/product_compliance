@@ -102,7 +102,10 @@ export const officerHistory = async (filters = {}) => {
 
 export const generateChallan = async (auditId) => {
   if (USE_MOCK) return new Blob(['Mock PDF'], { type: 'application/pdf' });
-  const response = await api.get(`/report/${auditId}`, { responseType: 'blob' });
+  
+  // Ensure the endpoint always includes the /report/ prefix
+  const cleanId = auditId.replace(/^\/report\//, '');
+  const response = await api.get(`/report/${cleanId}`, { responseType: 'blob' });
   return response.data;
 };
 
