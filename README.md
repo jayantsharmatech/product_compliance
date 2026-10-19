@@ -337,7 +337,7 @@ Recommended coverage: normalization logic, scoring rules, retry behavior, databa
 
 ## 21. License
 
-Specify your license here (e.g., MIT, Apache-2.0, or proprietary). If this system is operated for a government or regulatory body, confirm the applicable licensing and data-handling policies.
+Made by Jayant Sharma.(jayantsharma.tech@gmail.com)
 
 ---
 
