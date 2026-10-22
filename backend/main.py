@@ -85,47 +85,42 @@ def upload_to_s3(file_bytes: bytes, object_name: str, content_type: str = "image
             return f"https://{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION}.amazonaws.com/{object_name}"
         except Exception as e:
             logger.error(f"S3 Upload Error: {e}")
-    # Base64 fallback if S3 fails or is unconfigured
     encoded = base64.b64encode(file_bytes).decode("utf-8")
     return f"data:{content_type};base64,{encoded}"
 
 # ------------------------------------------------------------------------------
-# 3. Gemini Multi-Model Fallback Extraction Engine & Dynamic Inference
+# 3. Gemini Extraction Engine with Spatial Bounding Boxes & Dynamic Inference
 # ------------------------------------------------------------------------------
 def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
-    """
-    Extracts product label details for Legal Metrology compliance using an 
-    ordered fallback array with a comprehensive flat and structured JSON schema.
-    """
     fallback_models = [
-        "gemini-3.8-flash",       # Primary flagship flash model
-        "gemini-3.7-flash",       # High-throughput balancing backup
-        "gemini-3.6-flash",       # Stable previous-generation workhorse
-        "gemini-3.5-flash-lite"   # Ultra-fast, highly accessible safety fallback
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite"
     ]
     
     detailed_prompt = """
     You are an expert Legal Metrology Inspector and OCR Compliance Assistant for packaged commodities under Indian law.
-    Analyze the provided product label image(s) meticulously. Extract the exact compliance attributes 
-    and output them strictly as a valid flat JSON object matching the schema below without markdown wrappers or extra commentary.
+    Analyze the provided product label image(s) meticulously. Extract the exact compliance attributes and their normalized spatial bounding boxes [ymin, xmin, ymax, xmax] on a 0-1000 scale.
+    Output strictly as a valid JSON object matching the schema below without markdown wrappers or extra commentary.
 
     Required JSON Schema:
     {
-      "product_name": "Full commercial name of the product",
-      "brand_name": "Brand name or manufacturer label prefix",
-      "product_category": "Category of the packaged item (e.g., food, beverage, cosmetics, electronics, general)",
-      "net_quantity": "Exact net quantity with units (e.g., 500 g, 1 L, 10 count) or NOT_FOUND",
-      "mrp": "Maximum Retail Price inclusive of all taxes with currency (e.g., ₹150 or INR 150) or NOT_FOUND",
-      "manufacturer_details": "Complete name and address of the manufacturer, packer, or importer or NOT_FOUND",
-      "country_of_origin": "Explicitly stated country of origin or manufacture on the label, or extract the country implied by the manufacturer's address or NOT_FOUND",
-      "common_generic_name": "Generic or common name of the commodity or NOT_FOUND",
-      "consumer_care_details": "Customer care email, phone, or address or NOT_FOUND",
-      "fssai_license_no": "FSSAI license number if food item, otherwise NOT_FOUND",
-      "mfg_date": "Month and Year of manufacture/packing or NOT_FOUND",
-      "expiry_date": "Expiry or Best Before date or NOT_FOUND"
+      "product_name": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "brand_name": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "product_category": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "net_quantity": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "mrp": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "manufacturer_details": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "country_of_origin": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "common_generic_name": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "consumer_care_details": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "fssai_license_no": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "mfg_date": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true},
+      "expiry_date": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true}
     }
 
-    If a specific attribute cannot be found on the label, assign its value strictly as "NOT_FOUND".
+    If a specific attribute cannot be found on the label, assign "value": "NOT_FOUND", "found": false, and "box_2d": [0,0,0,0].
     """
 
     contents = []
@@ -134,11 +129,8 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     contents.append(detailed_prompt)
 
     last_exception = None
-
     for model_name in fallback_models:
         try:
-            logger.info(f"[Gemini Extraction] Attempting inference with model: {model_name}")
-            
             response = gemini_client.models.generate_content(
                 model=model_name,
                 contents=contents,
@@ -147,67 +139,55 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
                     response_mime_type="application/json"
                 )
             )
-            
             if response and response.text:
-                logger.info(f"[Gemini Extraction] Successfully processed using {model_name}")
                 return json.loads(response.text)
-                
         except Exception as e:
             last_exception = e
-            logger.warning(f"[Gemini Warning] Model {model_name} failed: {str(e)}. Shifting to next fallback...")
             continue
 
-    logger.error(f"All Gemini fallback models exhausted. Error: {str(last_exception)}")
     return {
-        "product_name": "Extraction Error Product",
-        "brand_name": "Generic",
-        "product_category": "general",
-        "net_quantity": "NOT_FOUND",
-        "mrp": "NOT_FOUND",
-        "manufacturer_details": "NOT_FOUND",
-        "country_of_origin": "NOT_FOUND",
-        "common_generic_name": "NOT_FOUND",
-        "consumer_care_details": "NOT_FOUND",
-        "fssai_license_no": "NOT_FOUND",
-        "mfg_date": "NOT_FOUND",
-        "expiry_date": "NOT_FOUND"
+        "product_name": {"value": "Extraction Error Product", "box_2d": [0,0,0,0], "found": False},
+        "brand_name": {"value": "Generic", "box_2d": [0,0,0,0], "found": False},
+        "product_category": {"value": "general", "box_2d": [0,0,0,0], "found": False},
+        "net_quantity": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "mrp": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "manufacturer_details": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "country_of_origin": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "common_generic_name": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "consumer_care_details": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "fssai_license_no": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "mfg_date": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False},
+        "expiry_date": {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False}
     }
 
-def infer_country_of_origin(extracted_data: dict) -> str:
-    """
-    Dynamically extracts/infers the country of origin from the manufacturer address 
-    or packaging text using regex pattern matching without hardcoded city names.
-    """
-    existing_origin = extracted_data.get("country_of_origin", "NOT_FOUND")
-    if existing_origin and existing_origin != "NOT_FOUND" and existing_origin.lower() != "n/a":
-        return existing_origin
+def infer_country_of_origin(extracted_data: dict) -> dict:
+    origin_obj = extracted_data.get("country_of_origin", {})
+    val = origin_obj.get("value") if isinstance(origin_obj, dict) else origin_obj
+    if val and val != "NOT_FOUND" and str(val).lower() != "n/a":
+        return origin_obj
 
-    mfg_details = str(extracted_data.get("manufacturer_details", ""))
+    mfg_obj = extracted_data.get("manufacturer_details", {})
+    mfg_details = str(mfg_obj.get("value") if isinstance(mfg_obj, dict) else mfg_obj)
     if not mfg_details or mfg_details == "NOT_FOUND":
-        return "NOT_FOUND"
+        return {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False}
 
     mfg_lower = mfg_details.lower()
-
-    # Match explicit country mentions in address strings
     country_match = re.search(r'\b(?:made in|country of origin|marketed by|imported by)[:\s]*([a-zA-Z\s]{3,20})', mfg_lower)
     if country_match:
         found_country = country_match.group(1).strip().title()
         if len(found_country) > 2:
-            return found_country
+            return {"value": found_country, "box_2d": mfg_obj.get("box_2d", [0, 0, 1000, 1000]), "found": True}
 
-    # Dynamic Indian Postal Index Number (PIN) check (6 digits starting with 1-8)
     has_indian_pincode = bool(re.search(r'\b[1-8][0-9]{5}\b', mfg_details))
-    
-    # Dynamic domestic corporate/entity marker check
     has_domestic_keyword = bool(re.search(r'\b(india|bharat|pvt\.? ltd\.?|ltd\.?|llp|inc\.?)\b', mfg_lower))
 
     if has_indian_pincode or has_domestic_keyword:
-        return "India"
+        return {"value": "India", "box_2d": mfg_obj.get("box_2d", [0, 0, 1000, 1000]), "found": True}
 
-    return "NOT_FOUND"
+    return {"value": "NOT_FOUND", "box_2d": [0,0,0,0], "found": False}
 
 # ------------------------------------------------------------------------------
-# 4. Rule Engine for Legal Metrology (PC) Rules, 2011 & FSSAI Act, 2006
+# 4. Category-Aware Rule Engine (Legal Metrology & FSSAI)
 # ------------------------------------------------------------------------------
 MANDATORY_DECLARATION_WEIGHTS = {
     "manufacturer_details": 20,
@@ -222,11 +202,15 @@ def evaluate_compliance(extracted_data: dict) -> dict:
     violations = []
     score = 100.0
     
-    category = (extracted_data.get("product_category") or "general").lower()
-    is_food = "food" in category or "beverage" in category or "grocery" in category
+    cat_obj = extracted_data.get("product_category", {})
+    category = str(cat_obj.get("value") if isinstance(cat_obj, dict) else cat_obj).lower()
+    
+    is_food = any(k in category for k in ["food", "beverage", "grocery", "edible", "snack", "drink"])
+    is_perishable_or_consumable = is_food or any(k in category for k in ["cosmetic", "medicine", "pharmaceutical", "supplement"])
 
     for field, weight in MANDATORY_DECLARATION_WEIGHTS.items():
-        val = extracted_data.get(field, "NOT_FOUND")
+        f_obj = extracted_data.get(field, {})
+        val = f_obj.get("value") if isinstance(f_obj, dict) else f_obj
         is_present = val and val != "NOT_FOUND" and val != "null"
         
         if not is_present:
@@ -240,8 +224,9 @@ def evaluate_compliance(extracted_data: dict) -> dict:
             })
 
     if is_food:
-        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
-        if not fssai_val or fssai_val == "NOT_FOUND":
+        f_obj = extracted_data.get("fssai_license_no", {})
+        val = f_obj.get("value") if isinstance(f_obj, dict) else f_obj
+        if not val or val == "NOT_FOUND":
             score -= 10.0
             violations.append({
                 "field": "fssai_license_no",
@@ -249,6 +234,19 @@ def evaluate_compliance(extracted_data: dict) -> dict:
                 "penalty_clause": "Section 52 FSSAI Act, 2006",
                 "max_fine": 3000,
                 "description": "FSSAI License number missing on packaged food item"
+            })
+
+    if is_perishable_or_consumable:
+        f_obj = extracted_data.get("expiry_date", {})
+        val = f_obj.get("value") if isinstance(f_obj, dict) else f_obj
+        if not val or val == "NOT_FOUND":
+            score -= 10.0
+            violations.append({
+                "field": "expiry_date",
+                "rule": "Legal Metrology (Packaged Commodities) Rules, 2011 - Best Before / Expiry Date",
+                "penalty_clause": "Section 36(1) Legal Metrology Act, 2009",
+                "max_fine": 3000,
+                "description": "Mandatory Best Before / Expiry date missing on consumable/perishable item"
             })
 
     score = max(0.0, min(100.0, score))
@@ -266,7 +264,7 @@ def evaluate_compliance(extracted_data: dict) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 5. ReportLab PDF Inspection Challan Generator (Matched to Professional Layout)
+# 5. ReportLab PDF Inspection Challan Generator (Category-Adjusted)
 # ------------------------------------------------------------------------------
 def generate_pdf_report(scan_data: dict) -> bytes:
     if not REPORTLAB_AVAILABLE:
@@ -307,9 +305,16 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         status_text = "FULLY COMPLIANT" if is_compliant else "NON_COMPLIANT"
         status_color = colors.HexColor("#15803D") if is_compliant else colors.HexColor("#B91C1C")
 
+        ext = scan_data.get("extracted_data", {})
+        def get_val(key):
+            item = ext.get(key, scan_data.get(key, "NOT_FOUND"))
+            if isinstance(item, dict):
+                return item.get("value", "NOT_FOUND")
+            return item
+
         info_data = [
             [Paragraph("<b>Audit Reference ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date & Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
-            [Paragraph("<b>Product Name:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_name", "N/A")), styles['Normal']), Paragraph("<b>Product Category:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_category", "N/A")), styles['Normal'])],
+            [Paragraph("<b>Product Name:</b>", styles['Normal']), Paragraph(str(get_val("product_name")), styles['Normal']), Paragraph("<b>Product Category:</b>", styles['Normal']), Paragraph(str(get_val("product_category")), styles['Normal'])],
             [Paragraph("<b>Inspection Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Compliance Score:</b>", styles['Normal']), Paragraph(f"{score}%", styles['Normal'])],
             [Paragraph("<b>Inspection Status:</b>", styles['Normal']), Paragraph(f"<b>{status_text}</b>", ParagraphStyle('St', parent=styles['Normal'], textColor=status_color)), Paragraph("", styles['Normal']), Paragraph("", styles['Normal'])]
         ]
@@ -324,7 +329,6 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         story.append(t)
         story.append(Spacer(1, 12))
 
-        # Violations Table
         violations = scan_data.get("violations", [])
         if violations:
             story.append(Paragraph("<b>IDENTIFIED COMPLIANCE VIOLATIONS & DEFECTS</b>", styles['Heading2']))
@@ -339,7 +343,7 @@ def generate_pdf_report(scan_data: dict) -> bytes:
                     Paragraph(str(v.get("description", "")), styles['Normal']),
                     Paragraph(f"Rs. {v.get('max_fine', 0):,}", styles['Normal'])
                 ])
-            
+             
             v_table = Table(v_table_data, colWidths=[180, 224, 100])
             v_table.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
@@ -356,7 +360,6 @@ def generate_pdf_report(scan_data: dict) -> bytes:
             story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor("#B91C1C"))))
             story.append(Spacer(1, 10))
 
-        # Statutory Declaration Details Table
         story.append(Paragraph("<b>STATUTORY DECLARATION DETAILS</b>", styles['Heading2']))
         decl_headers = [
             Paragraph("<b>Mandatory Declaration</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold')),
@@ -364,24 +367,40 @@ def generate_pdf_report(scan_data: dict) -> bytes:
             Paragraph("<b>Compliance Status</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold'))
         ]
         decl_rows = [decl_headers]
-        
+         
+        category = str(get_val("product_category")).lower()
+        is_food = any(k in category for k in ["food", "beverage", "grocery", "edible", "snack", "drink"])
+        is_perishable_or_consumable = is_food or any(k in category for k in ["cosmetic", "medicine", "pharmaceutical", "supplement"])
+
         fields_to_show = [
-            ("MRP", scan_data.get("mrp", "NOT_FOUND")),
-            ("Net Quantity", scan_data.get("net_quantity", "NOT_FOUND")),
-            ("Manufacturer Details", scan_data.get("manufacturer_details", "NOT_FOUND")),
-            ("Consumer Care Details", scan_data.get("consumer_care_details", "NOT_FOUND")),
-            ("Country Of Origin", scan_data.get("country_of_origin", "NOT_FOUND")),
-            ("Common/Generic Name", scan_data.get("common_generic_name", "NOT_FOUND")),
-            ("FSSAI License No", scan_data.get("fssai_license_no", "NOT_FOUND")),
-            ("Mfg Date", scan_data.get("mfg_date", "NOT_FOUND")),
-            ("Expiry Date", scan_data.get("expiry_date", "NOT_FOUND")),
+            ("MRP", get_val("mrp")),
+            ("Net Quantity", get_val("net_quantity")),
+            ("Manufacturer Details", get_val("manufacturer_details")),
+            ("Consumer Care Details", get_val("consumer_care_details")),
+            ("Country Of Origin", get_val("country_of_origin")),
+            ("Common/Generic Name", get_val("common_generic_name")),
         ]
 
+        if is_food:
+            fields_to_show.append(("FSSAI License No", get_val("fssai_license_no")))
+        else:
+            fields_to_show.append(("FSSAI License No", "N/A (Exempted (Non-Food))"))
+
+        fields_to_show.append(("Mfg Date", get_val("mfg_date")))
+
+        if is_perishable_or_consumable:
+            fields_to_show.append(("Expiry Date", get_val("expiry_date")))
+        else:
+            fields_to_show.append(("Expiry Date", "N/A (Exempted (Non-Perishable))"))
+
         for label, val in fields_to_show:
-            is_found = val and val != "NOT_FOUND" and val != "null"
-            stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
+            if "Exempted" in str(val):
+                stat = "EXEMPTED"
+            else:
+                is_found = val and val != "NOT_FOUND" and val != "null"
+                stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
+             
             cleaned_val = str(val).replace('₹', 'Rs. ')
-            
             decl_rows.append([
                 Paragraph(str(label), styles['Normal']),
                 Paragraph(cleaned_val, styles['Normal']),
@@ -419,7 +438,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.5.0",
+    version="3.8.0",
     lifespan=lifespan
 )
 
@@ -451,7 +470,6 @@ async def fetch_history(
 ):
     try:
         records = get_all_scans()
-
         if search:
             st = search.lower()
             records = [
@@ -480,55 +498,46 @@ async def scan_single_image(
 ):
     try:
         file_bytes = await file.read()
-        
         scan_id = f"scan_{int(datetime.now().timestamp() * 1000)}"
         image_url = upload_to_s3(file_bytes, f"scans/{scan_id}.jpg")
 
         extracted_data = extract_label_with_gemini_fallbacks([file_bytes])
         
-        # SMART DYNAMIC AUTO-INFERENCE: Infer country of origin from address/pincode patterns
-        if extracted_data.get("country_of_origin", "NOT_FOUND") == "NOT_FOUND":
+        origin_obj = extracted_data.get("country_of_origin", {})
+        origin_val = origin_obj.get("value") if isinstance(origin_obj, dict) else origin_obj
+        if not origin_val or origin_val == "NOT_FOUND":
             extracted_data["country_of_origin"] = infer_country_of_origin(extracted_data)
 
         eval_res = evaluate_compliance(extracted_data)
 
-        mrp_val = extracted_data.get("mrp", "NOT_FOUND")
-        net_qty_val = extracted_data.get("net_quantity", "NOT_FOUND")
-        mfg_val = extracted_data.get("manufacturer_details", "NOT_FOUND")
-        origin_val = extracted_data.get("country_of_origin", "NOT_FOUND")
-        generic_val = extracted_data.get("common_generic_name", "NOT_FOUND")
-        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
-        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
-        mfg_date_val = extracted_data.get("mfg_date", "NOT_FOUND")
-        expiry_val = extracted_data.get("expiry_date", "NOT_FOUND")
+        flat_record = {}
+        for k, v in extracted_data.items():
+            if isinstance(v, dict):
+                flat_record[k] = v.get("value", "NOT_FOUND")
+            else:
+                flat_record[k] = v
+
+        mrp_val = flat_record.get("mrp", "NOT_FOUND")
+        net_qty_val = flat_record.get("net_quantity", "NOT_FOUND")
+        mfg_val = flat_record.get("manufacturer_details", "NOT_FOUND")
+        origin_val = flat_record.get("country_of_origin", "NOT_FOUND")
+        generic_val = flat_record.get("common_generic_name", "NOT_FOUND")
+        consumer_val = flat_record.get("consumer_care_details", "NOT_FOUND")
+        fssai_val = flat_record.get("fssai_license_no", "NOT_FOUND")
+        mfg_date_val = flat_record.get("mfg_date", "NOT_FOUND")
+        expiry_val = flat_record.get("expiry_date", "NOT_FOUND")
 
         scan_record = {
             "scan_id": scan_id,
             "timestamp": datetime.now().isoformat(),
-            "product_name": extracted_data.get("product_name", "Packaged Good"),
-            "brand_name": extracted_data.get("brand_name", "Generic"),
-            "product_category": extracted_data.get("product_category", "general"),
+            **flat_record,
             "net_quantity": net_qty_val,
             "netQty": net_qty_val,
-            "mrp": mrp_val,
             "manufacturer_details": mfg_val,
             "manufacturer": mfg_val,
-            "country_of_origin": origin_val,
-            "common_generic_name": generic_val,
             "consumer_care_details": consumer_val,
             "consumerCare": consumer_val,
-            "fssai_license_no": fssai_val,
-            "mfg_date": mfg_date_val,
-            "expiry_date": expiry_val,
-            "declarations": {
-                "mrp": {"present": mrp_val != "NOT_FOUND", "value": mrp_val},
-                "net_quantity": {"present": net_qty_val != "NOT_FOUND", "value": net_qty_val},
-                "manufacturer_details": {"present": mfg_val != "NOT_FOUND", "value": mfg_val},
-                "country_of_origin": {"present": origin_val != "NOT_FOUND", "value": origin_val},
-                "common_generic_name": {"present": generic_val != "NOT_FOUND", "value": generic_val},
-                "consumer_care_details": {"present": consumer_val != "NOT_FOUND", "value": consumer_val},
-                "fssai_license_no": {"present": fssai_val != "NOT_FOUND", "value": fssai_val}
-            },
+            "extracted_fields": extracted_data,
             "extracted_data": extracted_data,
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],
@@ -566,36 +575,34 @@ async def scan_multiple_images(
 
         extracted_data = extract_label_with_gemini_fallbacks(image_bytes_list)
         
-        # SMART DYNAMIC AUTO-INFERENCE: Infer country of origin from address/pincode patterns
-        if extracted_data.get("country_of_origin", "NOT_FOUND") == "NOT_FOUND":
+        origin_obj = extracted_data.get("country_of_origin", {})
+        origin_val = origin_obj.get("value") if isinstance(origin_obj, dict) else origin_obj
+        if not origin_val or origin_val == "NOT_FOUND":
             extracted_data["country_of_origin"] = infer_country_of_origin(extracted_data)
 
         eval_res = evaluate_compliance(extracted_data)
 
-        mrp_val = extracted_data.get("mrp", "NOT_FOUND")
-        net_qty_val = extracted_data.get("net_quantity", "NOT_FOUND")
-        mfg_val = extracted_data.get("manufacturer_details", "NOT_FOUND")
-        origin_val = extracted_data.get("country_of_origin", "NOT_FOUND")
-        generic_val = extracted_data.get("common_generic_name", "NOT_FOUND")
-        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
-        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
+        flat_record = {}
+        for k, v in extracted_data.items():
+            if isinstance(v, dict):
+                flat_record[k] = v.get("value", "NOT_FOUND")
+            else:
+                flat_record[k] = v
+
+        mrp_val = flat_record.get("mrp", "NOT_FOUND")
+        net_qty_val = flat_record.get("net_quantity", "NOT_FOUND")
+        mfg_val = flat_record.get("manufacturer_details", "NOT_FOUND")
+        origin_val = flat_record.get("country_of_origin", "NOT_FOUND")
 
         scan_record = {
             "scan_id": scan_id,
             "timestamp": datetime.now().isoformat(),
-            "product_name": extracted_data.get("product_name", "Packaged Good"),
-            "brand_name": extracted_data.get("brand_name", "Generic"),
-            "product_category": extracted_data.get("product_category", "general"),
+            **flat_record,
             "net_quantity": net_qty_val,
             "netQty": net_qty_val,
-            "mrp": mrp_val,
             "manufacturer_details": mfg_val,
             "manufacturer": mfg_val,
-            "country_of_origin": origin_val,
-            "common_generic_name": generic_val,
-            "consumer_care_details": consumer_val,
-            "consumerCare": consumer_val,
-            "fssai_license_no": fssai_val,
+            "extracted_fields": extracted_data,
             "extracted_data": extracted_data,
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],

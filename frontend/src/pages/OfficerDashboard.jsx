@@ -143,6 +143,18 @@ export default function OfficerDashboard() {
     }
   };
 
+  // Spatial Bounding Box CSS Converter (0-1000 normalization scale)
+  const getDynamicBoxStyle = (box2d) => {
+    if (!box2d || !Array.isArray(box2d) || box2d.length !== 4) return null;
+    const [ymin, xmin, ymax, xmax] = box2d;
+    return {
+      top: `${(ymin / 1000) * 100}%`,
+      left: `${(xmin / 1000) * 100}%`,
+      height: `${((ymax - ymin) / 1000) * 100}%`,
+      width: `${((xmax - xmin) / 1000) * 100}%`,
+    };
+  };
+
   const filteredHistory = history.filter((item) => {
     const productName = item.product || item.product_name || '';
     const brandName = item.brand || item.brand_name || '';
@@ -263,6 +275,26 @@ export default function OfficerDashboard() {
                     <div className="relative rounded-xl overflow-hidden border border-slate-300 bg-black/90 p-2 flex justify-center">
                       <div className="relative inline-block w-full">
                         <img src={images[0]} alt="Packaging Label Scan" className="max-h-96 object-contain mx-auto block w-full" />
+
+                        {/* Bounding Box Overlays */}
+                        {auditResult?.extracted_fields &&
+                          Object.entries(auditResult.extracted_fields).map(([key, field]) => {
+                            if (!field?.box_2d || field?.found === false) return null;
+                            const style = getDynamicBoxStyle(field.box_2d);
+                            if (!style) return null;
+
+                            return (
+                              <div
+                                key={key}
+                                style={style}
+                                className="absolute border-2 border-emerald-400 bg-emerald-400/20 shadow-[0_0_8px_rgba(16,185,129,0.5)] rounded transition-all group pointer-events-auto"
+                              >
+                                <span className="absolute -top-7 left-0 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[10px] font-semibold px-2 py-0.5 rounded shadow-md whitespace-nowrap z-40">
+                                  <span className="text-emerald-400">{key.replace(/_/g, ' ').toUpperCase()}</span>: {field.value || 'Detected'}
+                                </span>
+                              </div>
+                            );
+                          })}
                       </div>
                     </div>
 
