@@ -103,9 +103,18 @@ export const officerHistory = async (filters = {}) => {
 export const generateChallan = async (auditId) => {
   if (USE_MOCK) return new Blob(['Mock PDF'], { type: 'application/pdf' });
   
-  // Ensure the endpoint always includes the /report/ prefix
-  const cleanId = auditId.replace(/^\/report\//, '');
-  const response = await api.get(`/report/${cleanId}`, { responseType: 'blob' });
+  // Clean the ID and ensure it always uses the exact /report/ route prefix
+  const cleanId = String(auditId || '').replace(/^\/?report\//, '');
+  const response = await api.get(`/report/${cleanId}`, { 
+    responseType: 'blob',
+    headers: { Accept: 'application/pdf' }
+  });
+  return response.data;
+};
+
+export const syncQueue = async () => {
+  if (USE_MOCK) return { status: 'success', synced_count: 0 };
+  const response = await api.post('/sync');
   return response.data;
 };
 

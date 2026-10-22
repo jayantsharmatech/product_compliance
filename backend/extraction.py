@@ -1,109 +1,72 @@
 import os
 import json
-import base64
-import logging
-from typing import List
+from google import genai
+from google.genai import types
 
-logger = logging.getLogger("uvicorn")
+# Initialize the Gemini client (automatically reads GEMINI_API_KEY from environment variables)
+client = genai.Client()
 
-try:
-    import boto3
-    AWS_AVAILABLE = True
-except ImportError:
-    AWS_AVAILABLE = False
+def extract_label_with_gemini_fallbacks(image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+    """
+    Extracts product label details for Legal Metrology compliance using an 
+    ordered fallback array to completely bypass peak traffic or rate limits.
+    """
+    # Ordered fallback priority: Newest primary workhorse down to ultra-stable backups
+    fallback_models = [
+        "gemini-3.8-flash",       # Primary flagship flash model
+        "gemini-3.7-flash",       # High-throughput balancing backup
+        "gemini-3.6-flash",       # Stable previous-generation workhorse
+        "gemini-3.5-flash-lite"   # Ultra-fast, highly accessible safety fallback
+    ]
+    
+    # Detailed, structured prompt tailored to enforce precise extraction mapping
+    detailed_prompt = """
+    You are an expert Legal Metrology Inspector and OCR Compliance Assistant for packaged commodities under Indian law.
+    Analyze the provided product label image meticulously. Extract the exact compliance attributes 
+    and output them strictly as a valid JSON object matching the schema below without markdown wrappers or extra commentary.
 
-
-def get_bedrock_client():
-    if not AWS_AVAILABLE:
-        return None
-    return boto3.client(
-        "bedrock-runtime",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        region_name=os.getenv("AWS_S3_REGION", "ap-south-1")
-    )
-
-
-def analyze_label_with_bedrock(image_bytes_list: List[bytes]) -> dict:
-    client = get_bedrock_client()
-    if not client:
-        logger.warning("AWS Bedrock client unavailable. Using fallback structural mock.")
-        return get_fallback_extraction()
-
-    try:
-        # Format image content for Amazon Nova Multi-modal Converse API
-        content_blocks = []
-        for img_bytes in image_bytes_list:
-            content_blocks.append({
-                "image": {
-                    "format": "jpeg",
-                    "source": {
-                        "bytes": img_bytes
-                    }
-                }
-            })
-
-        prompt = """
-        Analyze these package label images under Legal Metrology (Packaged Commodities) Rules, 2011.
-        Extract details and respond strictly in valid JSON format with no markdown tags around it:
-        {
-          "product_name": string,
-          "brand_name": string,
-          "product_category": string ("food" or "general"),
-          "manufacturer": string,
-          "declarations": {
-             "manufacturer_details": {"present": boolean, "text": string},
-             "country_of_origin": {"present": boolean, "text": string},
-             "common_generic_name": {"present": boolean, "text": string},
-             "net_quantity": {"present": boolean, "text": string},
-             "mrp": {"present": boolean, "text": string},
-             "consumer_care_details": {"present": boolean, "text": string},
-             "fssai_license_no": {"present": boolean, "text": string}
-          }
-        }
-        """
-        
-        content_blocks.append({
-            "text": prompt
-        })
-
-        # Amazon Nova Converse API payload structure
-        response = client.converse(
-            modelId="amazon.nova-pro-v1:0",
-            messages=[
-                {
-                    "role": "user",
-                    "content": content_blocks
-                }
-            ],
-            inferenceConfig={
-                "maxTokens": 1000,
-                "temperature": 0.1
-            }
-        )
-
-        raw_text = response["output"]["message"]["content"][0]["text"]
-        clean_json = raw_text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_json)
-
-    except Exception as e:
-        logger.error(f"Amazon Nova Vision Extraction Error: {e}")
-        return get_fallback_extraction()
-
-
-def get_fallback_extraction() -> dict:
-    return {
-        "product_name": "GlucoChoice Orange Flavour",
-        "brand_name": "Apollo Life",
-        "product_category": "food",
-        "manufacturer": "Apollo Hospitals Enterprise",
-        "declarations": {
-            "manufacturer_details": {"present": True, "text": "Apollo Life"},
-            "country_of_origin": {"present": True, "text": "India"},
-            "common_generic_name": {"present": True, "text": "Glucose Powder"},
-            "net_quantity": {"present": True, "text": "500 g"},
-            "mrp": {"present": True, "text": "Rs. 185.00"},
-            "consumer_care_details": {"present": True, "text": "Available"},
-            "fssai_license_no": {"present": True, "text": "10012022000123"}
-        }
+    Required JSON Schema:
+    {
+      "product_name": "Full commercial name of the product",
+      "net_quantity": "Expressed in standard metric units (e.g., g, kg, ml, L, or count)",
+      "manufacturer_details": "Complete name and address of the manufacturer, packer, or importer",
+      "consumer_care_contact": "Email, phone number, or customer service contact details",
+      "month_year_of_packing": "Month and Year of manufacture/packing (e.g., MM/YYYY or Month YYYY)",
+      "maximum_retail_price_mrp": "MRP inclusive of all taxes, clearly indicating currency (e.g., ₹ or INR)"
     }
+
+    If a specific field cannot be found or is missing entirely on the label, assign its value explicitly as "NOT_FOUND".
+    """
+    
+    last_exception = None
+
+    for model_name in fallback_models:
+        try:
+            print(f"[Gemini Extraction] Attempting inference with model: {model_name}")
+            
+            response = client.models.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type,
+                    ),
+                    detailed_prompt
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.0,  # Zero temperature for maximum deterministic extraction precision
+                    response_mime_type="application/json"  # Forces strict structural JSON compliance
+                )
+            )
+            
+            if response and response.text:
+                print(f"[Gemini Extraction] Successfully processed using {model_name}")
+                return response.text
+                
+        except Exception as e:
+            last_exception = e
+            print(f"[Gemini Warning] Model {model_name} failed or encountered traffic limits: {str(e)}. Shifting to next fallback...")
+            continue
+
+    # If every model in the fallback array encounters issues
+    raise RuntimeError(f"All Gemini fallback models exhausted. Critical error: {str(last_exception)}")
