@@ -143,18 +143,6 @@ export default function OfficerDashboard() {
     }
   };
 
-  // Fixed CSS Box calculation syntax
-  const getDynamicBoxStyle = (box2d) => {
-    if (!box2d || !Array.isArray(box2d) || box2d.length !== 4) return null;
-    const [ymin, xmin, ymax, xmax] = box2d;
-    return {
-      top: `${(ymin / 1000) * 100}%`,
-      left: `${(xmin / 1000) * 100}%`,
-      height: `${((ymax - ymin) / 1000) * 100}%`,
-      width: `${((xmax - xmin) / 1000) * 100}%`,
-    };
-  };
-
   const filteredHistory = history.filter((item) => {
     const productName = item.product || item.product_name || '';
     const brandName = item.brand || item.brand_name || '';
@@ -325,25 +313,48 @@ export default function OfficerDashboard() {
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">MRP</p>
                       <p className="font-semibold text-slate-900">
-                        {renderFieldValue(auditResult.mrp || auditResult.extracted_data?.mrp || auditResult.declarations?.mrp)}
+                        {renderFieldValue(
+                          auditResult.mrp || 
+                          auditResult.extracted_data?.mrp || 
+                          auditResult.declarations?.mrp?.value || 
+                          auditResult.extracted_fields?.mrp
+                        )}
                       </p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Net Quantity</p>
                       <p className="font-semibold text-slate-900">
-                        {renderFieldValue(auditResult.net_quantity || auditResult.extracted_data?.net_quantity || auditResult.declarations?.net_quantity)}
+                        {renderFieldValue(
+                          auditResult.net_quantity || 
+                          auditResult.netQty || 
+                          auditResult.extracted_data?.net_quantity || 
+                          auditResult.declarations?.net_quantity?.value || 
+                          auditResult.extracted_fields?.net_quantity
+                        )}
                       </p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Manufacturer</p>
                       <p className="font-semibold text-slate-900">
-                        {renderFieldValue(auditResult.manufacturer_details || auditResult.extracted_data?.manufacturer_details || auditResult.declarations?.manufacturer_details)}
+                        {renderFieldValue(
+                          auditResult.manufacturer_details || 
+                          auditResult.manufacturer || 
+                          auditResult.extracted_data?.manufacturer_details || 
+                          auditResult.declarations?.manufacturer_details?.value || 
+                          auditResult.extracted_fields?.manufacturer
+                        )}
                       </p>
                     </div>
                     <div className="bg-slate-50 p-3 rounded-lg">
                       <p className="text-xs text-slate-500">Consumer Care</p>
                       <p className="font-semibold text-slate-900">
-                        {renderFieldValue(auditResult.consumer_care_details || auditResult.extracted_data?.consumer_care_details || auditResult.declarations?.consumer_care_details)}
+                        {renderFieldValue(
+                          auditResult.consumer_care_details || 
+                          auditResult.consumerCare || 
+                          auditResult.extracted_data?.consumer_care_details || 
+                          auditResult.declarations?.consumer_care_details?.value || 
+                          auditResult.extracted_fields?.consumer_care
+                        )}
                       </p>
                     </div>
                   </div>

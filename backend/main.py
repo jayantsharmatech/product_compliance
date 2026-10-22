@@ -294,15 +294,19 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         violations = scan_data.get("violations", [])
         if violations:
             story.append(Paragraph("<b>IDENTIFIED COMPLIANCE VIOLATIONS & DEFECTS</b>", styles['Heading2']))
-            v_table_data = [["Rule / Statutory Declaration", "Observed Defect", "Fine / Penalty"]]
+            v_table_data = [[
+                Paragraph("<b>Rule / Statutory Declaration</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white)),
+                Paragraph("<b>Observed Defect</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white)),
+                Paragraph("<b>Fine / Penalty</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white))
+            ]]
             for v in violations:
                 v_table_data.append([
                     Paragraph(str(v.get("rule", "")), styles['Normal']),
                     Paragraph(str(v.get("description", "")), styles['Normal']),
-                    f"Rs. {v.get('max_fine', 0):,}"
+                    Paragraph(f"Rs. {v.get('max_fine', 0):,}", styles['Normal'])
                 ])
             
-            v_table = Table(v_table_data, colWidths=[200, 204, 100])
+            v_table = Table(v_table_data, colWidths=[180, 224, 100])
             v_table.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.white),
@@ -320,7 +324,11 @@ def generate_pdf_report(scan_data: dict) -> bytes:
 
         # Statutory Declaration Details Table
         story.append(Paragraph("<b>STATUTORY DECLARATION DETAILS</b>", styles['Heading2']))
-        decl_headers = ["Mandatory Declaration", "Extracted Value", "Compliance Status"]
+        decl_headers = [
+            Paragraph("<b>Mandatory Declaration</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold')),
+            Paragraph("<b>Extracted Value</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold')),
+            Paragraph("<b>Compliance Status</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold'))
+        ]
         decl_rows = [decl_headers]
         
         fields_to_show = [
@@ -338,15 +346,21 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         for label, val in fields_to_show:
             is_found = val and val != "NOT_FOUND" and val != "null"
             stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
-            decl_rows.append([label, str(val), stat])
+            cleaned_val = str(val).replace('₹', 'Rs. ')
+            
+            decl_rows.append([
+                Paragraph(str(label), styles['Normal']),
+                Paragraph(cleaned_val, styles['Normal']),
+                Paragraph(stat, styles['Normal'])
+            ])
 
-        d_table = Table(decl_rows, colWidths=[150, 204, 150])
+        d_table = Table(decl_rows, colWidths=[130, 270, 100])
         d_table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1E3A8A")),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
             ('PADDING', (0,0), (-1,-1), 5),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ]))
         story.append(d_table)
 
@@ -371,7 +385,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.2.0",
+    version="3.3.0",
     lifespan=lifespan
 )
 
@@ -436,17 +450,15 @@ async def scan_single_image(
         scan_id = f"scan_{int(datetime.now().timestamp() * 1000)}"
         image_url = upload_to_s3(file_bytes, f"scans/{scan_id}.jpg")
 
-        # Uses Gemini Multi-Model Fallback Chain with Flat Schema
         extracted_data = extract_label_with_gemini_fallbacks([file_bytes])
         eval_res = evaluate_compliance(extracted_data)
 
-        # Populate top-level fields AND nested declarations/extracted_data for complete UI compatibility
         mrp_val = extracted_data.get("mrp", "NOT_FOUND")
         net_qty_val = extracted_data.get("net_quantity", "NOT_FOUND")
         mfg_val = extracted_data.get("manufacturer_details", "NOT_FOUND")
-        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
         origin_val = extracted_data.get("country_of_origin", "NOT_FOUND")
         generic_val = extracted_data.get("common_generic_name", "NOT_FOUND")
+        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
         fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
         mfg_date_val = extracted_data.get("mfg_date", "NOT_FOUND")
         expiry_val = extracted_data.get("expiry_date", "NOT_FOUND")
@@ -458,15 +470,17 @@ async def scan_single_image(
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
             "net_quantity": net_qty_val,
+            "netQty": net_qty_val,
             "mrp": mrp_val,
             "manufacturer_details": mfg_val,
+            "manufacturer": mfg_val,
             "country_of_origin": origin_val,
             "common_generic_name": generic_val,
             "consumer_care_details": consumer_val,
+            "consumerCare": consumer_val,
             "fssai_license_no": fssai_val,
             "mfg_date": mfg_date_val,
             "expiry_date": expiry_val,
-            # Add nested objects for frontend components looking for declarations or extracted_data
             "declarations": {
                 "mrp": {"present": mrp_val != "NOT_FOUND", "value": mrp_val},
                 "net_quantity": {"present": net_qty_val != "NOT_FOUND", "value": net_qty_val},
@@ -529,11 +543,14 @@ async def scan_multiple_images(
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
             "net_quantity": net_qty_val,
+            "netQty": net_qty_val,
             "mrp": mrp_val,
             "manufacturer_details": mfg_val,
+            "manufacturer": mfg_val,
             "country_of_origin": origin_val,
             "common_generic_name": generic_val,
             "consumer_care_details": consumer_val,
+            "consumerCare": consumer_val,
             "fssai_license_no": fssai_val,
             "extracted_data": extracted_data,
             "compliance_score": eval_res["compliance_score"],
