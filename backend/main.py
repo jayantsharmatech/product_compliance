@@ -89,12 +89,12 @@ def upload_to_s3(file_bytes: bytes, object_name: str, content_type: str = "image
     return f"data:{content_type};base64,{encoded}"
 
 # ------------------------------------------------------------------------------
-# 3. Gemini Multi-Model Fallback Extraction Engine (Flattened Schema)
+# 3. Gemini Multi-Model Fallback Extraction Engine
 # ------------------------------------------------------------------------------
 def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     """
     Extracts product label details for Legal Metrology compliance using an 
-    ordered fallback array with a flat JSON schema matching frontend UI expectations.
+    ordered fallback array with a comprehensive flat and structured JSON schema.
     """
     fallback_models = [
         "gemini-3.8-flash",       # Primary flagship flash model
@@ -113,13 +113,15 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
       "product_name": "Full commercial name of the product",
       "brand_name": "Brand name or manufacturer label prefix",
       "product_category": "Category of the packaged item (e.g., food, beverage, cosmetics, electronics, general)",
-      "net_quantity": "Exact net quantity with units (e.g., 500 g, 1 L) or NOT_FOUND",
+      "net_quantity": "Exact net quantity with units (e.g., 500 g, 1 L, 10 count) or NOT_FOUND",
       "mrp": "Maximum Retail Price inclusive of all taxes with currency (e.g., ₹150 or INR 150) or NOT_FOUND",
       "manufacturer_details": "Complete name and address of the manufacturer, packer, or importer or NOT_FOUND",
       "country_of_origin": "Country of origin or manufacture or NOT_FOUND",
       "common_generic_name": "Generic or common name of the commodity or NOT_FOUND",
       "consumer_care_details": "Customer care email, phone, or address or NOT_FOUND",
-      "fssai_license_no": "FSSAI license number if food item, otherwise NOT_FOUND"
+      "fssai_license_no": "FSSAI license number if food item, otherwise NOT_FOUND",
+      "mfg_date": "Month and Year of manufacture/packing or NOT_FOUND",
+      "expiry_date": "Expiry or Best Before date or NOT_FOUND"
     }
 
     If a specific attribute cannot be found on the label, assign its value strictly as "NOT_FOUND".
@@ -140,7 +142,7 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
                 model=model_name,
                 contents=contents,
                 config=types.GenerateContentConfig(
-                    temperature=0.0,  # Zero temperature for precise deterministic extraction
+                    temperature=0.0,
                     response_mime_type="application/json"
                 )
             )
@@ -165,7 +167,9 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
         "country_of_origin": "NOT_FOUND",
         "common_generic_name": "NOT_FOUND",
         "consumer_care_details": "NOT_FOUND",
-        "fssai_license_no": "NOT_FOUND"
+        "fssai_license_no": "NOT_FOUND",
+        "mfg_date": "NOT_FOUND",
+        "expiry_date": "NOT_FOUND"
     }
 
 # ------------------------------------------------------------------------------
@@ -228,7 +232,7 @@ def evaluate_compliance(extracted_data: dict) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 5. ReportLab PDF Inspection Challan Generator
+# 5. ReportLab PDF Inspection Challan Generator (Matched to Professional Layout)
 # ------------------------------------------------------------------------------
 def generate_pdf_report(scan_data: dict) -> bytes:
     if not REPORTLAB_AVAILABLE:
@@ -243,60 +247,108 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         title_style = ParagraphStyle(
             'DocTitle',
             parent=styles['Heading1'],
-            fontSize=18,
-            leading=22,
+            fontSize=16,
+            leading=20,
             textColor=colors.HexColor("#1E3A8A"),
             alignment=1
         )
 
-        story.append(Paragraph("LEGAL METROLOGY INSPECTION CHALLAN", title_style))
-        story.append(Paragraph("Department of Consumer Affairs | Government of India", ParagraphStyle('Sub', parent=styles['Normal'], alignment=1, fontSize=10, textColor=colors.gray)))
-        story.append(Spacer(1, 15))
+        subtitle_style = ParagraphStyle(
+            'DocSubTitle',
+            parent=styles['Normal'],
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#4B5563"),
+            alignment=1
+        )
+
+        story.append(Paragraph("LEGAL METROLOGY COMPLIANCE INSPECTION REPORT", title_style))
+        story.append(Paragraph("Issued under Legal Metrology (Packaged Commodities) Rules, 2011 & Act, 2009 | Govt. of India", subtitle_style))
+        story.append(Spacer(1, 10))
 
         scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
         timestamp = scan_data.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        score = scan_data.get("compliance_score", 0)
+        is_compliant = scan_data.get("is_compliant", True)
+        status_text = "FULLY COMPLIANT" if is_compliant else "NON_COMPLIANT"
+        status_color = colors.HexColor("#15803D") if is_compliant else colors.HexColor("#B91C1C")
 
         info_data = [
-            [Paragraph("<b>Challan ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date/Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
-            [Paragraph("<b>Product:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_name", "N/A")), styles['Normal']), Paragraph("<b>Category:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_category", "N/A")), styles['Normal'])],
-            [Paragraph("<b>Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Score:</b>", styles['Normal']), Paragraph(f"{scan_data.get('compliance_score', 0)}%", styles['Normal'])],
+            [Paragraph("<b>Audit Reference ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date & Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
+            [Paragraph("<b>Product Name:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_name", "N/A")), styles['Normal']), Paragraph("<b>Product Category:</b>", styles['Normal']), Paragraph(str(scan_data.get("product_category", "N/A")), styles['Normal'])],
+            [Paragraph("<b>Inspection Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Compliance Score:</b>", styles['Normal']), Paragraph(f"{score}%", styles['Normal'])],
+            [Paragraph("<b>Inspection Status:</b>", styles['Normal']), Paragraph(f"<b>{status_text}</b>", ParagraphStyle('St', parent=styles['Normal'], textColor=status_color)), Paragraph("", styles['Normal']), Paragraph("", styles['Normal'])]
         ]
 
-        t = Table(info_data, colWidths=[80, 180, 80, 180])
+        t = Table(info_data, colWidths=[110, 160, 110, 160])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
             ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-            ('PADDING', (0,0), (-1,-1), 6),
+            ('PADDING', (0,0), (-1,-1), 5),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
         story.append(t)
-        story.append(Spacer(1, 15))
+        story.append(Spacer(1, 12))
 
+        # Violations Table
         violations = scan_data.get("violations", [])
         if violations:
-            story.append(Paragraph("<b>Statutory Violations & Fine Breakdown</b>", styles['Heading2']))
-            v_table_data = [["Rule Violation", "Statutory Clause", "Fine (INR)"]]
+            story.append(Paragraph("<b>IDENTIFIED COMPLIANCE VIOLATIONS & DEFECTS</b>", styles['Heading2']))
+            v_table_data = [["Rule / Statutory Declaration", "Observed Defect", "Fine / Penalty"]]
             for v in violations:
                 v_table_data.append([
                     Paragraph(str(v.get("rule", "")), styles['Normal']),
-                    Paragraph(str(v.get("penalty_clause", "")), styles['Normal']),
+                    Paragraph(str(v.get("description", "")), styles['Normal']),
                     f"Rs. {v.get('max_fine', 0):,}"
                 ])
             
-            v_table = Table(v_table_data, colWidths=[240, 180, 100])
+            v_table = Table(v_table_data, colWidths=[200, 204, 100])
             v_table.setStyle(TableStyle([
                 ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
                 ('TEXTCOLOR', (0,0), (-1,0), colors.white),
                 ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#FCA5A5")),
-                ('PADDING', (0,0), (-1,-1), 6),
+                ('PADDING', (0,0), (-1,-1), 5),
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ]))
             story.append(v_table)
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 8))
 
             compounding_fine = scan_data.get("compounding_fine_inr", 5000)
-            fine_text = f"<b>Total Compounding Amount (Sec 36(1) Cap):</b> Rs. {compounding_fine:,}"
-            story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=12, textColor=colors.HexColor("#B91C1C"))))
-        else:
-            story.append(Paragraph("<b>Status:</b> FULLY COMPLIANT", ParagraphStyle('Comp', parent=styles['Normal'], fontSize=14, textColor=colors.HexColor("#15803D"))))
+            fine_text = f"<b>TOTAL COMPOUNDING CHALLAN FINE (Sec. 36(1)):</b> Statutory 1st offense compounding cap applied — Rs. {compounding_fine:,}"
+            story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor("#B91C1C"))))
+            story.append(Spacer(1, 10))
+
+        # Statutory Declaration Details Table
+        story.append(Paragraph("<b>STATUTORY DECLARATION DETAILS</b>", styles['Heading2']))
+        decl_headers = ["Mandatory Declaration", "Extracted Value", "Compliance Status"]
+        decl_rows = [decl_headers]
+        
+        fields_to_show = [
+            ("MRP", scan_data.get("mrp", "NOT_FOUND")),
+            ("Net Quantity", scan_data.get("net_quantity", "NOT_FOUND")),
+            ("Manufacturer Details", scan_data.get("manufacturer_details", "NOT_FOUND")),
+            ("Consumer Care Details", scan_data.get("consumer_care_details", "NOT_FOUND")),
+            ("Country Of Origin", scan_data.get("country_of_origin", "NOT_FOUND")),
+            ("Common/Generic Name", scan_data.get("common_generic_name", "NOT_FOUND")),
+            ("FSSAI License No", scan_data.get("fssai_license_no", "NOT_FOUND")),
+            ("Mfg Date", scan_data.get("mfg_date", "NOT_FOUND")),
+            ("Expiry Date", scan_data.get("expiry_date", "NOT_FOUND")),
+        ]
+
+        for label, val in fields_to_show:
+            is_found = val and val != "NOT_FOUND" and val != "null"
+            stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
+            decl_rows.append([label, str(val), stat])
+
+        d_table = Table(decl_rows, colWidths=[150, 204, 150])
+        d_table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1E3A8A")),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
+            ('PADDING', (0,0), (-1,-1), 5),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
+        story.append(d_table)
 
         doc.build(story)
     except Exception as e:
@@ -319,7 +371,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.1.0",
+    version="3.2.0",
     lifespan=lifespan
 )
 
@@ -388,19 +440,43 @@ async def scan_single_image(
         extracted_data = extract_label_with_gemini_fallbacks([file_bytes])
         eval_res = evaluate_compliance(extracted_data)
 
+        # Populate top-level fields AND nested declarations/extracted_data for complete UI compatibility
+        mrp_val = extracted_data.get("mrp", "NOT_FOUND")
+        net_qty_val = extracted_data.get("net_quantity", "NOT_FOUND")
+        mfg_val = extracted_data.get("manufacturer_details", "NOT_FOUND")
+        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
+        origin_val = extracted_data.get("country_of_origin", "NOT_FOUND")
+        generic_val = extracted_data.get("common_generic_name", "NOT_FOUND")
+        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
+        mfg_date_val = extracted_data.get("mfg_date", "NOT_FOUND")
+        expiry_val = extracted_data.get("expiry_date", "NOT_FOUND")
+
         scan_record = {
             "scan_id": scan_id,
             "timestamp": datetime.now().isoformat(),
             "product_name": extracted_data.get("product_name", "Packaged Good"),
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
-            "net_quantity": extracted_data.get("net_quantity", "NOT_FOUND"),
-            "mrp": extracted_data.get("mrp", "NOT_FOUND"),
-            "manufacturer_details": extracted_data.get("manufacturer_details", "NOT_FOUND"),
-            "country_of_origin": extracted_data.get("country_of_origin", "NOT_FOUND"),
-            "common_generic_name": extracted_data.get("common_generic_name", "NOT_FOUND"),
-            "consumer_care_details": extracted_data.get("consumer_care_details", "NOT_FOUND"),
-            "fssai_license_no": extracted_data.get("fssai_license_no", "NOT_FOUND"),
+            "net_quantity": net_qty_val,
+            "mrp": mrp_val,
+            "manufacturer_details": mfg_val,
+            "country_of_origin": origin_val,
+            "common_generic_name": generic_val,
+            "consumer_care_details": consumer_val,
+            "fssai_license_no": fssai_val,
+            "mfg_date": mfg_date_val,
+            "expiry_date": expiry_val,
+            # Add nested objects for frontend components looking for declarations or extracted_data
+            "declarations": {
+                "mrp": {"present": mrp_val != "NOT_FOUND", "value": mrp_val},
+                "net_quantity": {"present": net_qty_val != "NOT_FOUND", "value": net_qty_val},
+                "manufacturer_details": {"present": mfg_val != "NOT_FOUND", "value": mfg_val},
+                "country_of_origin": {"present": origin_val != "NOT_FOUND", "value": origin_val},
+                "common_generic_name": {"present": generic_val != "NOT_FOUND", "value": generic_val},
+                "consumer_care_details": {"present": consumer_val != "NOT_FOUND", "value": consumer_val},
+                "fssai_license_no": {"present": fssai_val != "NOT_FOUND", "value": fssai_val}
+            },
+            "extracted_data": extracted_data,
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],
             "violations": eval_res["violations"],
@@ -435,9 +511,16 @@ async def scan_multiple_images(
             url = upload_to_s3(b, f"scans/{scan_id}_{idx}.jpg")
             image_urls.append(url)
 
-        # Uses Gemini Multi-Model Fallback Chain with Flat Schema
         extracted_data = extract_label_with_gemini_fallbacks(image_bytes_list)
         eval_res = evaluate_compliance(extracted_data)
+
+        mrp_val = extracted_data.get("mrp", "NOT_FOUND")
+        net_qty_val = extracted_data.get("net_quantity", "NOT_FOUND")
+        mfg_val = extracted_data.get("manufacturer_details", "NOT_FOUND")
+        origin_val = extracted_data.get("country_of_origin", "NOT_FOUND")
+        generic_val = extracted_data.get("common_generic_name", "NOT_FOUND")
+        consumer_val = extracted_data.get("consumer_care_details", "NOT_FOUND")
+        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
 
         scan_record = {
             "scan_id": scan_id,
@@ -445,13 +528,14 @@ async def scan_multiple_images(
             "product_name": extracted_data.get("product_name", "Packaged Good"),
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
-            "net_quantity": extracted_data.get("net_quantity", "NOT_FOUND"),
-            "mrp": extracted_data.get("mrp", "NOT_FOUND"),
-            "manufacturer_details": extracted_data.get("manufacturer_details", "NOT_FOUND"),
-            "country_of_origin": extracted_data.get("country_of_origin", "NOT_FOUND"),
-            "common_generic_name": extracted_data.get("common_generic_name", "NOT_FOUND"),
-            "consumer_care_details": extracted_data.get("consumer_care_details", "NOT_FOUND"),
-            "fssai_license_no": extracted_data.get("fssai_license_no", "NOT_FOUND"),
+            "net_quantity": net_qty_val,
+            "mrp": mrp_val,
+            "manufacturer_details": mfg_val,
+            "country_of_origin": origin_val,
+            "common_generic_name": generic_val,
+            "consumer_care_details": consumer_val,
+            "fssai_license_no": fssai_val,
+            "extracted_data": extracted_data,
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],
             "violations": eval_res["violations"],
