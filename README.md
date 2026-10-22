@@ -1,344 +1,363 @@
-# Legal Metrology Enforcement Application
+<div align="center">
 
-> AI-assisted statutory compliance auditing for packaged commodities, built for enforcement officers.
+# ⚖️ Legal Metrology Compliance Platform
 
-![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
-![Starlette](https://img.shields.io/badge/Backend-Starlette_(ASGI)-009688)
-![Vercel](https://img.shields.io/badge/Deploy-Vercel_Serverless-000000?logo=vercel)
-![AWS Bedrock](https://img.shields.io/badge/AI-Amazon_Nova_Pro-FF9900?logo=amazonaws&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/DB-AWS_RDS_PostgreSQL-4169E1?logo=postgresql&logoColor=white)
-![Status](https://img.shields.io/badge/Status-Production-success)
+**AI-powered, category-aware packaging label audit and enforcement for regulatory inspectors**
+
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Gemini](https://img.shields.io/badge/Google%20Gemini-Vision-4285F4?logo=google&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
+![AWS S3](https://img.shields.io/badge/AWS-S3-FF9900?logo=amazons3&logoColor=white)
+
+</div>
 
 ---
 
 ## Table of Contents
 
-1. [Overview](#1-overview)
-2. [Key Features](#2-key-features)
-3. [Architecture](#3-architecture)
-4. [Technology Stack](#4-technology-stack)
-5. [Role of TinyFish](#5-role-of-tinyfish)
-6. [Operational Workflow](#6-operational-workflow)
-7. [Statutory Parameters Extracted](#7-statutory-parameters-extracted)
-8. [Getting Started](#8-getting-started)
-9. [Configuration](#9-configuration)
-10. [API Reference](#10-api-reference)
-11. [Database](#11-database)
-12. [Deployment (Vercel)](#12-deployment-vercel)
-13. [Security & Compliance](#13-security--compliance)
-14. [Reliability & Error Handling](#14-reliability--error-handling)
-15. [Observability](#15-observability)
-16. [Troubleshooting & Resolved Incidents](#16-troubleshooting--resolved-incidents)
-17. [Project Structure](#17-project-structure)
-18. [Testing](#18-testing)
-19. [Roadmap](#19-roadmap)
-20. [Contributing](#20-contributing)
-21. [License](#21-license)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [How It Works](#how-it-works)
+  - [End-to-End Pipeline](#end-to-end-pipeline) · [Request Sequence](#request-sequence) · [Rule Engine Flow](#rule-engine-decision-flow) · [Model Fallback](#gemini-model-fallback) · [Offline Queue](#offline-queue--sync) · [Architecture](#system-architecture)
+- [Technology Stack](#technology-stack)
+- [Project Structure](#project-structure)
+- [Core Modules](#core-modules)
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [API Reference](#api-reference)
+- [Docker Deployment](#docker-deployment)
+- [Regulatory Reference](#regulatory-reference)
+- [Roadmap](#roadmap)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ---
 
-## 1. Overview
+## Overview
 
-The **Legal Metrology Enforcement Application** is a high-performance Python/Starlette web platform that lets enforcement officers automate the inspection of product packaging. An officer uploads or captures a photo of a product label; the system extracts the mandatory declarations required under Legal Metrology (Packaged Commodities) regulations, scores the product for compliance, stores an auditable record, and generates a PDF challan on demand.
+Enforcement officers traditionally inspect retail packages by hand, checking each label for the statutory declarations required under Indian law: MRP, net quantity, manufacturer details, country of origin, consumer care details, and FSSAI licence numbers. The process is slow, repetitive, and prone to inconsistency between inspectors.
 
-**The problem:** manual label inspection is slow, inconsistent between officers, and hard to audit.
+The **Legal Metrology Compliance Platform** automates the full inspection lifecycle. An inspector photographs a package in the field, and the platform extracts the label text, evaluates it against the applicable rules for that product category, calculates the penalty, and produces an official challan PDF, all in one workflow.
 
-**The solution:** an agentic pipeline combining TinyFish for orchestration and normalization, Amazon Nova Pro (via AWS Bedrock) for multimodal vision analysis, and AWS RDS PostgreSQL for durable, queryable audit trails.
+## Key Features
 
-## 2. Key Features
-
-| Capability | Description |
+| Feature | Description |
 |---|---|
-| **Officer Workbench** | Upload or snap label imagery and run an audit in a single flow. |
-| **Automated Parameter Extraction** | Extracts MRP, Net Quantity, Manufacturer details, and Consumer Care information. |
-| **Compliance Scoring** | Calculates a compliance score per inspection based on extracted declarations. |
-| **PDF Challan Generation** | Renders instant, printable challans from audit results. |
-| **Analytics Dashboard** | Aggregated views over historical inspections. |
-| **Live Sync Indicators** | Real-time status of scan, inference, and persistence stages. |
-| **Serverless Scale** | Runs on Vercel Serverless Functions with no servers to manage. |
-| **Encrypted Persistence** | AWS RDS PostgreSQL in Mumbai (`ap-south-1`) with mandatory SSL. |
+| 🔍 **Multimodal AI Extraction** | Google Gemini reads label text from package photos and returns spatial bounding boxes (`box_2d`) on a normalized **0–1000** coordinate grid. |
+| 🧠 **Category-Aware Rule Engine** | Detects the product category (Food & Beverage, Electronics, Stationery, etc.) and applies the correct statutory requirements and exemptions, for example exempting non-food items from FSSAI and expiry checks. |
+| 💰 **Automated Fine Calculation** | Evaluates infractions against **Section 36** of the Legal Metrology Act, applying compounding caps and first-offence relief rules. |
+| 📄 **Professional PDF Challans** | Generates government-style inspection reports with GPS coordinates and a visual breakdown of violations using ReportLab. |
+| 📅 **Date Normalization** | Parses messy manufacturing and expiry date formats found on real packages into a standard form. |
+| 📡 **Offline Queue** | Scans captured with poor connectivity are queued locally and synchronized later. |
+| ☁️ **Secure Cloud Storage** | Package images are uploaded to AWS S3, with a base64 data-URI fallback when S3 is unavailable. |
+| 🔁 **Model Fallback Chain** | Automatically falls back across multiple Gemini models for resilience against quota or availability issues. |
 
-## 3. Architecture
+## How It Works
+
+### End-to-End Pipeline
+
+```mermaid
+flowchart LR
+    A["📸 Inspector captures<br/>package photo + GPS"] --> B["extraction.py<br/>Gemini OCR + box_2d"]
+    B --> C["date_engine.py<br/>Normalize MFG / Expiry"]
+    C --> D["rule_engine.py<br/>Category rules + fine"]
+    D --> E["pdf_generator.py<br/>Challan PDF"]
+    D --> F[("database.py<br/>Scan records")]
+    A -.-> G[("s3_service.py<br/>Image storage")]
+
+    style A fill:#e3f2fd,stroke:#1976d2,color:#000
+    style B fill:#fff3e0,stroke:#f57c00,color:#000
+    style C fill:#fff3e0,stroke:#f57c00,color:#000
+    style D fill:#fce4ec,stroke:#c2185b,color:#000
+    style E fill:#e8f5e9,stroke:#388e3c,color:#000
+    style F fill:#f3e5f5,stroke:#7b1fa2,color:#000
+    style G fill:#f3e5f5,stroke:#7b1fa2,color:#000
+```
+
+1. **Capture**: the inspector uploads one or more package photos along with GPS coordinates.
+2. **Extract**: Gemini returns structured JSON containing each declaration's text value and its bounding box.
+3. **Normalize**: dates are parsed and standardized.
+4. **Evaluate**: the rule engine detects the category, applies relevant rules and exemptions, deducts compliance score, and computes the fine.
+5. **Report**: a challan PDF is generated and the scan is stored in history.
+
+### Request Sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Inspector
+    participant API as FastAPI (main.py)
+    participant S3 as s3_service.py
+    participant AI as extraction.py (Gemini)
+    participant DT as date_engine.py
+    participant RE as rule_engine.py
+    participant DB as database.py
+    participant PDF as pdf_generator.py
+
+    Inspector->>API: POST /scan (image + GPS)
+    API->>S3: Upload image
+    S3-->>API: URL (or base64 fallback)
+    API->>AI: Extract label fields
+    AI-->>API: Values + box_2d (0-1000)
+    API->>DT: Normalize dates
+    DT-->>API: Standard MFG / Expiry
+    API->>RE: Evaluate compliance
+    RE-->>API: Violations, score, fine
+    API->>DB: Save scan record
+    API-->>Inspector: Scan result + scan_id
+    Inspector->>API: GET /report/{scan_id}
+    API->>PDF: Build challan
+    PDF-->>Inspector: PDF challan
+```
+
+### Rule Engine Decision Flow
 
 ```mermaid
 flowchart TD
-    A[Officer Workbench / Vite SPA] -->|Upload product image| B[Starlette API: POST /scan]
-    B --> C[TinyFish Agent<br/>orchestration + normalization]
-    C --> D[AWS Bedrock Runtime<br/>Amazon Nova Pro, ap-south-1]
-    D --> C
-    C --> E[(AWS RDS PostgreSQL<br/>sslmode=require)]
-    E --> F[Compliance score + audit log]
-    F --> G[PDF Challan / Dashboard]
-    G --> A
+    S([Extracted label data]) --> C{"Detect product<br/>category"}
+    C -->|Food & Beverage| F["Apply LM Rules<br/>+ FSSAI checks"]
+    C -->|Electronics| N["Apply LM Rules<br/>FSSAI exempt"]
+    C -->|Stationery / Other| N
+    F --> M{"Mandatory declarations<br/>present?"}
+    N --> M
+    M -->|Missing items| V["Record violations<br/>deduct score"]
+    M -->|All present| OK(["✅ Compliant"])
+    V --> P{"First offence?"}
+    P -->|Yes| R["Apply first-offence<br/>relief"]
+    P -->|No| X["Standard penalty"]
+    R --> CAP["Apply Section 36<br/>compounding cap"]
+    X --> CAP
+    CAP --> OUT(["Final fine + compliance score"])
+
+    style OK fill:#e8f5e9,stroke:#388e3c,color:#000
+    style OUT fill:#fce4ec,stroke:#c2185b,color:#000
+    style V fill:#fff3e0,stroke:#f57c00,color:#000
 ```
 
-**Design principles**
+### Gemini Model Fallback
 
-- **Stateless compute:** Vercel functions hold no state; all persistence is in RDS.
-- **Separation of concerns:** orchestration (TinyFish), inference (Nova Pro), and storage (PostgreSQL) are independently replaceable.
-- **Region affinity:** Bedrock and RDS both run in `ap-south-1` to minimize latency and keep data in-region.
-- **Secure by default:** secrets are injected via Vercel; database traffic is always encrypted.
+```mermaid
+flowchart LR
+    R([Extraction request]) --> M1["Primary model<br/>gemini-3.8-flash"]
+    M1 -->|Success| OK([Return JSON + box_2d])
+    M1 -->|Quota / error| M2["Next fallback model"]
+    M2 -->|Success| OK
+    M2 -->|Quota / error| M3["Last fallback<br/>gemini-3.5-flash-lite"]
+    M3 -->|Success| OK
+    M3 -->|Fails| ERR(["Error returned /<br/>scan queued"])
 
-## 4. Technology Stack
+    style OK fill:#e8f5e9,stroke:#388e3c,color:#000
+    style ERR fill:#ffebee,stroke:#c62828,color:#000
+```
 
-| Layer | Technology |
+### Offline Queue & Sync
+
+```mermaid
+flowchart TD
+    A([Scan captured]) --> B{"Network / API<br/>available?"}
+    B -->|Yes| C["Process immediately"]
+    B -->|No| D["Save image to<br/>queued_scan_images/"]
+    D --> E[("Queue record<br/>in database.py")]
+    E --> F{"Connectivity<br/>restored?"}
+    F -->|No| F
+    F -->|Yes| G["Sync queued scans"]
+    G --> C
+    C --> H(["Result + challan available"])
+```
+
+### System Architecture
+
+```mermaid
+flowchart TB
+    subgraph Client["Client"]
+        U["Inspector device<br/>camera + GPS"]
+    end
+
+    subgraph Backend["FastAPI Backend (Docker)"]
+        M["main.py<br/>routing + health"]
+        X["extraction.py"]
+        D["date_engine.py"]
+        R["rule_engine.py"]
+        P["pdf_generator.py"]
+        S["s3_service.py"]
+        DB["database.py"]
+    end
+
+    subgraph External["External Services"]
+        G["Google Gemini API"]
+        S3[("AWS S3")]
+    end
+
+    subgraph Data["Persistence"]
+        SQL[("SQLite / PostgreSQL")]
+    end
+
+    U <--> M
+    M --> X --> G
+    M --> D
+    M --> R
+    M --> P
+    M --> S --> S3
+    M --> DB --> SQL
+```
+
+> The diagrams above use [Mermaid](https://mermaid.js.org/), which renders natively on GitHub, GitLab and most Markdown viewers. The flow shown reflects the module responsibilities described in this document; adjust the branches if your implementation differs.
+
+## Technology Stack
+
+| Layer | Technologies |
 |---|---|
-| Backend framework | Python, Starlette (ASGI) |
-| Hosting | Vercel Serverless Functions |
-| Extraction agent | TinyFish (`tinyfish==0.9.0`) |
-| Vision / AI | AWS Bedrock Runtime via `boto3`, Amazon Nova Pro |
-| Resilience | `tenacity` (retry/backoff) |
-| Database | AWS RDS PostgreSQL (`ap-south-1`, SSL required) |
-| Frontend | Vite SPA |
-| Reporting | Client/server PDF challan generation |
+| **Backend** | Python, FastAPI, Uvicorn |
+| **AI Engine** | Google Gemini via the `google-genai` SDK, with multi-model fallback (`gemini-3.8-flash` down to `gemini-3.5-flash-lite`) |
+| **Reports & Imaging** | ReportLab, Pillow |
+| **Storage** | SQLite / PostgreSQL, AWS S3 (Boto3) |
+| **HTTP** | Requests |
+| **Deployment** | Docker |
 
-## 5. Role of TinyFish
+## Project Structure
 
-TinyFish (`tinyfish==0.9.0`) is the orchestration and extraction middleware at the center of the pipeline.
+```
+product_compliance/
+└── backend/
+    ├── queued_scan_images/   # Images held for offline queue sync
+    ├── static/               # Static assets
+    ├── .env                  # Environment variables (not committed)
+    ├── database.py           # Persistent scan records & offline queue
+    ├── date_engine.py        # MFG / expiry date normalization
+    ├── Dockerfile            # Container configuration
+    ├── extraction.py         # Gemini vision OCR & bounding box parser
+    ├── main.py               # FastAPI app, routing & health checks
+    ├── pdf_generator.py      # ReportLab challan generator
+    ├── requirements.txt      # Python dependencies
+    ├── rule_engine.py        # Legal Metrology & FSSAI rule engine
+    └── s3_service.py         # S3 upload with base64 fallback
+```
 
-1. **Automated inspection parsing:** when an officer uploads a label image, TinyFish initializes structural parsing routines for the incoming media.
-2. **Agentic vision handshake:** it coordinates payload handoff between the frontend request and the downstream multimodal pipeline (Amazon Nova Pro on Bedrock).
-3. **Data normalization:** it converts raw, unstructured model output into clean statutory parameters (MRP, Net Quantity, Manufacturer, Consumer Care) before anything is persisted.
-4. **Resilient error boundaries:** it supports graceful degradation and retry behavior (with companion libraries such as `tenacity`) to keep serverless execution dependable.
+## Core Modules
 
-## 6. Operational Workflow
-
-1. **Capture:** the officer starts a scan from the dashboard.
-2. **Orchestration:** the request reaches the Starlette `/scan` endpoint, where TinyFish processes and structures the media stream.
-3. **Inference:** Amazon Nova Pro analyzes the label for statutory compliance.
-4. **Persistence & reporting:** results are saved to PostgreSQL, the compliance score is computed, and a PDF challan can be rendered immediately.
-
-## 7. Statutory Parameters Extracted
-
-| Parameter | Purpose |
+| Module | Responsibility |
 |---|---|
-| **MRP** | Maximum Retail Price declaration (inclusive of all taxes). |
-| **Net Quantity** | Declared quantity by weight, volume, or count. |
-| **Manufacturer / Packer details** | Name and address of the responsible entity. |
-| **Consumer Care** | Contact details for consumer complaints. |
+| **`main.py`** | FastAPI entrypoint. Exposes `/scan`, `/scan-multi`, `/history`, and `/report/{scan_id}` along with health checks. |
+| **`extraction.py`** | Calls Gemini with multi-model fallback and a strict JSON schema, returning text values and `box_2d` boxes on the 0–1000 grid. |
+| **`rule_engine.py`** | Evaluates compliance under Indian packaging law, deducts scores, and calculates compounding fines while respecting category exemptions. |
+| **`pdf_generator.py`** | Builds category-aware, government-grade inspection challan PDFs with ReportLab. |
+| **`date_engine.py`** | Standardizes manufacturing and expiry date formats. |
+| **`s3_service.py`** | Handles secure uploads to AWS S3, falling back to base64 data URIs. |
+| **`database.py`** | Manages scan records and offline queue synchronization. |
 
-> Compliance rules are defined by the applicable Legal Metrology (Packaged Commodities) regulations. Always validate scoring logic against the current notified rules before operational use.
-
-## 8. Getting Started
+## Getting Started
 
 ### Prerequisites
 
-- Python 3.11+
-- Node.js 18+ and npm (for the Vite frontend)
-- An AWS account with Bedrock model access to **Amazon Nova Pro** in `ap-south-1`
-- An AWS RDS PostgreSQL instance reachable from your deployment
-- A TinyFish API key
-- Vercel CLI (`npm i -g vercel`) for local serverless emulation
+- Python 3.10 or newer
+- A [Google Gemini API key](https://aistudio.google.com/)
+- (Optional) An AWS account and S3 bucket for image storage
 
-### Installation
+### 1. Clone and install
 
 ```bash
-# Clone
-git clone <your-repo-url>
-cd legal-metrology-app
+git clone <your-repository-url>
+cd product_compliance/backend
 
-# Backend
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+
 pip install -r requirements.txt
-
-# Frontend
-cd frontend
-npm install
-cd ..
 ```
 
-### Run locally
+### 2. Configure environment variables
+
+Create a `.env` file inside `backend/` (see [Configuration](#configuration)).
+
+### 3. Run the server
 
 ```bash
-# Copy and fill environment variables (see Configuration)
-cp .env.example .env
-
-# Option A: Vercel dev (mirrors production)
-vercel dev
-
-# Option B: ASGI server directly
-uvicorn app.main:app --reload --port 8000
-
-# Frontend (separate terminal)
-cd frontend && npm run dev
+uvicorn main:app --reload --port 8000
 ```
 
-## 9. Configuration
+The API is now available at `http://localhost:8000`, and interactive docs at `http://localhost:8000/docs`.
 
-All secrets are managed in Vercel and must be scoped to **Production, Preview, and Development**.
+## Configuration
 
-| Variable | Description | Scope |
+Create `backend/.env`:
+
+```env
+GEMINI_API_KEY=your_google_genai_api_key_here
+AWS_ACCESS_KEY_ID=your_aws_access_key
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key
+AWS_STORAGE_BUCKET_NAME=your_s3_bucket_name
+AWS_S3_REGION=ap-south-1
+```
+
+| Variable | Required | Description |
 |---|---|---|
-| `TINYFISH_API_KEY` | Authentication token for TinyFish agent execution | All environments (Secret) |
-| `AWS_ACCESS_KEY_ID` | IAM user access key (`legal-metrology-app-user`) | All environments (Secret) |
-| `AWS_SECRET_ACCESS_KEY` | IAM user secret access key | All environments (Secret) |
-| `AWS_REGION` / `AWS_S3_REGION` | Regional endpoint for AWS services (`ap-south-1`) | All environments |
-| `DATABASE_URL` | PostgreSQL connection URI with SSL enforced | All environments (Secret) |
+| `GEMINI_API_KEY` | ✅ | Google Gemini API key used for label extraction. |
+| `AWS_ACCESS_KEY_ID` | Optional | AWS credentials for S3 uploads. |
+| `AWS_SECRET_ACCESS_KEY` | Optional | AWS credentials for S3 uploads. |
+| `AWS_STORAGE_BUCKET_NAME` | Optional | Target S3 bucket. |
+| `AWS_S3_REGION` | Optional | S3 region (default shown: `ap-south-1`). |
 
-**`DATABASE_URL` format**
+> **Note:** If S3 credentials are not provided, images fall back to base64 data URIs.
+> Never commit `.env` to version control. Make sure it is listed in `.gitignore`.
 
-```text
-postgresql://<DB_USER>:<DB_PASSWORD>@<RDS_ENDPOINT>.ap-south-1.rds.amazonaws.com:5432/<DB_NAME>?sslmode=require
-```
+## API Reference
 
-> **Never commit real credentials.** Keep `.env` in `.gitignore` and use only placeholders in documentation and examples.
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/scan` | Submit a single package image for extraction and compliance evaluation. |
+| `POST` | `/scan-multi` | Submit multiple images (e.g. front, back, side panels) of one package for a combined audit. |
+| `GET` | `/history` | List previously stored scan records. |
+| `GET` | `/report/{scan_id}` | Download the generated PDF challan for a scan. |
 
-## 10. API Reference
+Full request and response schemas are available in the auto-generated Swagger UI at `/docs`.
 
-> The `/scan` endpoint is part of the documented architecture. Request and response shapes below are illustrative; align them with the implemented schema.
+### Bounding Box Format
 
-### `POST /scan`
-
-Submits a product label image for extraction and compliance scoring.
-
-**Request**
-
-```http
-POST /scan
-Content-Type: multipart/form-data
-
-image: <file>
-```
-
-**Response (illustrative)**
+Each extracted field includes a `box_2d` value on a normalized 0–1000 grid, independent of the original image resolution:
 
 ```json
 {
-  "inspection_id": "uuid",
-  "extracted": {
-    "mrp": "string",
-    "net_quantity": "string",
-    "manufacturer": "string",
-    "consumer_care": "string"
-  },
-  "compliance_score": 0.0,
-  "status": "completed"
+  "field": "mrp",
+  "value": "₹ 120.00",
+  "box_2d": [ymin, xmin, ymax, xmax]
 }
 ```
 
-**Errors**
+To convert to pixels: `pixel_x = (x / 1000) * image_width` and `pixel_y = (y / 1000) * image_height`.
 
-| Code | Meaning |
-|---|---|
-| `400` | Missing or invalid image payload |
-| `401` | Authentication failure |
-| `502` | Upstream failure (Bedrock / TinyFish) after retries |
-| `500` | Unexpected server error |
-
-## 11. Database
-
-- **Engine:** AWS RDS PostgreSQL
-- **Region:** Mumbai (`ap-south-1`)
-- **Transport security:** SSL mandatory via `?sslmode=require`
-- **Stores:** audit logs, extracted statutory parameters, compliance scores
-
-**Operational guidance**
-
-- Use alphanumeric master passwords to avoid URI-encoding issues in the connection string.
-- Restrict the RDS security group to known ingress sources.
-- Enable automated backups and a defined retention period.
-- Use a dedicated least-privilege application role rather than the master user.
-
-## 12. Deployment (Vercel)
-
-1. **Verify scoping:** confirm all secrets are enabled for Production, Preview, and Development.
-2. **Deploy:** push to the connected branch or run `vercel --prod`.
-3. **Cache-free redeployment** (required after changing secrets):
-   - Open the Vercel **Deployments** tab.
-   - Select **Redeploy** on the target deployment.
-   - **Uncheck "Use existing Build Cache"** so fresh secrets are injected.
-
-## 13. Security & Compliance
-
-| Area | Practice |
-|---|---|
-| Secrets | Stored as Vercel Secrets; never in source control. |
-| Data in transit | TLS everywhere; PostgreSQL requires `sslmode=require`. |
-| Data residency | Compute inference and storage in `ap-south-1`. |
-| IAM | Dedicated IAM user with least-privilege Bedrock access only. |
-| Auditability | Every inspection is persisted with extracted values and score. |
-| Rotation | Rotate AWS keys, DB passwords, and API tokens on a regular schedule and after any suspected exposure. |
-
-**Recommended hardening**
-
-- Replace long-lived IAM user keys with short-lived credentials (e.g., OIDC federation from Vercel) where possible.
-- Move the RDS instance behind private networking and use a connection pooler such as RDS Proxy for serverless workloads.
-- Add authentication, role-based access control, and rate limiting on `/scan`.
-- Apply image size and type validation before invoking any model.
-
-## 14. Reliability & Error Handling
-
-- **Retries:** transient failures are retried with exponential backoff using `tenacity`.
-- **Graceful degradation:** TinyFish error boundaries return structured failures rather than unhandled exceptions.
-- **Idempotency:** design scan submissions so retries do not create duplicate audit records.
-- **Serverless considerations:** keep cold-start work light, reuse clients across invocations, and use connection pooling for PostgreSQL.
-
-## 15. Observability
-
-- Use Vercel function logs for request and error tracing.
-- Track key metrics: scan latency, Bedrock error rate, retry counts, extraction confidence, and compliance score distribution.
-- Add alerting for sustained 5xx rates and database connection failures.
-
-## 16. Troubleshooting & Resolved Incidents
-
-| Symptom | Cause | Resolution |
-|---|---|---|
-| Bedrock `AccessDeniedException` on a new AWS account | Automated account verification hold on foundation model access, lasting up to ~2 hours | Wait for verification to complete, then retry. Confirm model access is enabled in `ap-south-1`. |
-| PostgreSQL authentication or encryption errors | Special characters in the master password and/or missing SSL enforcement | Use an alphanumeric master password and append `?sslmode=require` to `DATABASE_URL`. |
-| Updated secrets not taking effect | Stale build cache | Redeploy with **"Use existing Build Cache"** unchecked. |
-| Missing variables in Preview/Development | Secret not scoped to all environments | Enable each secret for Production, Preview, and Development. |
-
-## 17. Project Structure
-
-> Adjust to match the actual repository layout.
-
-```text
-.
-├── api/                  # Vercel serverless entrypoints
-├── app/
-│   ├── main.py           # Starlette application and routes
-│   ├── agents/           # TinyFish orchestration and normalization
-│   ├── vision/           # Bedrock / Nova Pro client
-│   ├── db/               # PostgreSQL access and models
-│   └── reports/          # Challan / PDF generation
-├── frontend/             # Vite SPA
-├── tests/
-├── requirements.txt
-├── vercel.json
-└── README.md
-```
-
-## 18. Testing
+## Docker Deployment
 
 ```bash
-pytest -q                 # backend unit and integration tests
-cd frontend && npm test   # frontend tests
+cd backend
+docker build -t legal-metrology-platform .
+docker run -d \
+  --name lm-platform \
+  --env-file .env \
+  -p 8000:8000 \
+  legal-metrology-platform
 ```
 
-Recommended coverage: normalization logic, scoring rules, retry behavior, database persistence, and a golden set of labeled product images for regression testing of extraction accuracy.
+## Regulatory Reference
 
-## 19. Roadmap
+| Instrument | Relevance |
+|---|---|
+| **Legal Metrology (Packaged Commodities) Rules, 2011** | Mandates declarations of MRP, net quantity, manufacturer details, consumer care, and country of origin. |
+| **Legal Metrology Act, 2009** | Governs Section 36 offences and compounding of fines. |
+| **FSSAI Packaging and Labelling Regulations, 2011** | Governs mandatory licence numbers and expiry declarations for food and beverage items. |
 
-- [ ] Role-based access control and officer identity management
-- [ ] Batch and multi-image inspections
-- [ ] Offline-capable mobile capture
-- [ ] Multilingual label support
-- [ ] Configurable compliance rule engine
-- [ ] Exportable analytics and scheduled reports
-- [ ] Human-in-the-loop review for low-confidence extractions
+## Roadmap
 
-## 20. Contributing
+- [ ] Mobile inspector companion app with offline-first capture
+- [ ] Barcode / QR cross-verification against product databases
+- [ ] Multilingual label support (Hindi and regional languages)
+- [ ] Inspector dashboard with analytics and violation trends
+- [ ] Role-based access control and audit logging
 
-1. Fork the repository and create a feature branch: `git checkout -b feature/<name>`
-2. Follow existing code style and add tests for new behavior.
-3. Never include secrets or real inspection data in commits.
-4. Open a pull request with a clear description and linked issue.
+## Disclaimer
 
-## 21. License
+This platform is an inspection **aid**. AI-extracted values and computed penalties should be verified by an authorized officer before any enforcement action is taken. Statutory provisions, fine schedules, and exemptions are subject to amendment; always confirm against current notifications.
 
-Made by Jayant Sharma.(jayantsharma.tech@gmail.com)
+## License
 
----
-
-*Maintained by the Legal Metrology Enforcement engineering team.*
+Developed for regulatory compliance enforcement and inspection automation. Add your chosen license (e.g. MIT, Apache-2.0, or a proprietary/government license) in a `LICENSE` file and update this section accordingly.
