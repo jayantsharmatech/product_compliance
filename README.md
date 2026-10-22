@@ -19,7 +19,7 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [How It Works](#how-it-works)
-  - [End-to-End Pipeline](#end-to-end-pipeline) · [Request Sequence](#request-sequence) · [Rule Engine Flow](#rule-engine-decision-flow) · [Model Fallback](#gemini-model-fallback) · [Offline Queue](#offline-queue--sync) · [Architecture](#system-architecture)
+- [End-to-End Pipeline](#end-to-end-pipeline) · [Request Sequence](#request-sequence) · [Rule Engine Flow](#rule-engine-decision-flow) · [Model Fallback](#gemini-model-fallback) · [Offline Queue](#offline-queue--sync) · [Architecture](#system-architecture)
 - [Technology Stack](#technology-stack)
 - [Project Structure](#project-structure)
 - [Core Modules](#core-modules)
@@ -359,5 +359,4 @@ docker run -d \
 This platform is an inspection **aid**. AI-extracted values and computed penalties should be verified by an authorized officer before any enforcement action is taken. Statutory provisions, fine schedules, and exemptions are subject to amendment; always confirm against current notifications.
 
 ## License
-
-Developed for regulatory compliance enforcement and inspection automation. Add your chosen license (e.g. MIT, Apache-2.0, or a proprietary/government license) in a `LICENSE` file and update this section accordingly.
+Made by Jayant Sharma
