@@ -21,28 +21,30 @@ logger = logging.getLogger("uvicorn")
 
 
 def resolve_image_input(scan_data: Dict[str, Any]) -> str:
-    """Extracts valid image string, unpacking JSON arrays or single strings."""
-    image_paths = scan_data.get("image_paths") or scan_data.get("images") or []
-
-    if isinstance(image_paths, str):
-        try:
-            image_paths = json.loads(image_paths)
-        except Exception:
-            image_paths = [image_paths]
-
-    if isinstance(image_paths, list) and len(image_paths) > 0:
-        return str(image_paths[0])
-
-    return str(scan_data.get("image_url") or "")
+    """Extracts valid image string from various possible keys in scan records."""
+    for key in ["image_url", "image", "image_path", "image_paths", "images"]:
+        val = scan_data.get(key)
+        if val:
+            if isinstance(val, list) and len(val) > 0:
+                return str(val[0])
+            if isinstance(val, str):
+                try:
+                    parsed = json.loads(val)
+                    if isinstance(parsed, list) and len(parsed) > 0:
+                        return str(parsed[0])
+                except Exception:
+                    pass
+                return str(val)
+    return ""
 
 
 def fetch_image_flowable(image_input: str, target_width: float = 210, target_height: float = 210):
-    """Vercel-compatible image loader supporting Base64 Data URIs, HTTP/S3 URLs, and files."""
+    """Robust image loader supporting Base64 Data URIs, direct S3 client fetching, HTTP/S URLs, and local files."""
     if not image_input or not isinstance(image_input, str):
         return Paragraph("<i>[Product Image Unavailable]</i>", getSampleStyleSheet()['Italic'])
 
     try:
-        # Case 1: Base64 Data URI (Vercel Preferred)
+        # Case 1: Base64 Data URI
         if image_input.startswith("data:image/"):
             header, encoded = image_input.split(",", 1)
             img_bytes = base64.b64decode(encoded)
@@ -52,8 +54,35 @@ def fetch_image_flowable(image_input: str, target_width: float = 210, target_hei
             img_buf.seek(0)
             return RLImage(img_buf, width=target_width, height=target_height)
 
-        # Case 2: Remote S3 / HTTP URL
-        elif image_input.startswith("http://") or image_input.startswith("https://"):
+        # Case 2: S3 URL -> Direct boto3 secure fetch (bypasses private bucket permission blocks)
+        if "amazonaws.com" in image_input or "s3." in image_input:
+            try:
+                import boto3
+                from urllib.parse import urlparse
+                parsed_url = urlparse(image_input)
+                netloc_parts = parsed_url.netloc.split('.')
+                bucket_name = netloc_parts[0]
+                object_key = parsed_url.path.lstrip('/')
+                
+                s3 = boto3.client(
+                    "s3",
+                    aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                    aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+                    region_name=os.getenv("AWS_S3_REGION", "ap-south-1")
+                )
+                obj = s3.get_object(Bucket=bucket_name, Key=object_key)
+                img_bytes = obj['Body'].read()
+                
+                pil_img = PILImage.open(io.BytesIO(img_bytes))
+                img_buf = io.BytesIO()
+                pil_img.save(img_buf, format='JPEG')
+                img_buf.seek(0)
+                return RLImage(img_buf, width=target_width, height=target_height)
+            except Exception as s3_err:
+                logger.warning(f"Direct S3 fetch failed, falling back to HTTP: {s3_err}")
+
+        # Case 3: Standard HTTP/S URL
+        if image_input.startswith("http://") or image_input.startswith("https://"):
             resp = requests.get(image_input, timeout=8)
             if resp.status_code == 200:
                 pil_img = PILImage.open(io.BytesIO(resp.content))
@@ -62,8 +91,8 @@ def fetch_image_flowable(image_input: str, target_width: float = 210, target_hei
                 img_buf.seek(0)
                 return RLImage(img_buf, width=target_width, height=target_height)
 
-        # Case 3: Local Disk File
-        elif os.path.exists(image_input):
+        # Case 4: Local Disk File
+        if os.path.exists(image_input):
             pil_img = PILImage.open(image_input)
             img_buf = io.BytesIO()
             pil_img.save(img_buf, format='JPEG')
@@ -110,8 +139,9 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
     scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
     timestamp = scan_data.get("timestamp", "N/A")
     compliance_score = scan_data.get("compliance_score", 0)
-    overall_status = scan_data.get("overall_status", "NON_COMPLIANT" if scan_data.get("violations") else "COMPLIANT")
-    prod_category = scan_data.get("product_category", "General Packaged Commodity")
+    prod_category = str(scan_data.get("product_category", "General Packaged Commodity"))
+    is_compliant = scan_data.get("is_compliant", True)
+    status_text = "COMPLIANT" if is_compliant else "NON_COMPLIANT"
 
     primary_image_str = resolve_image_input(scan_data)
     img_flowable = fetch_image_flowable(primary_image_str)
@@ -122,8 +152,8 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
     <b>Inspection Location:</b> {scan_data.get('location_name', 'Officer Field Inspection')}<br/>
     <b>Product Name:</b> {scan_data.get('product_name', 'Unknown Commodity')}<br/>
     <b>Product Category:</b> <b>{prod_category}</b><br/><br/>
-    <b>Weighted Compliance Score:</b> <font color="{ '#166534' if compliance_score >= 80 else '#991b1b' }"><b>{compliance_score}%</b></font><br/>
-    <b>Status:</b> <font color="{ '#166534' if compliance_score >= 85 and not scan_data.get('violations') else '#991b1b' }"><b>{ 'COMPLIANT' if compliance_score >= 85 and not scan_data.get('violations') else 'NON_COMPLIANT' }</b></font>
+    <b>Weighted Compliance Score:</b> <font color="{ '#166534' if compliance_score >= 85 else '#991b1b' }"><b>{compliance_score}%</b></font><br/>
+    <b>Status:</b> <font color="{ '#166534' if is_compliant else '#991b1b' }"><b>{status_text}</b></font>
     """
 
     meta_table = Table([[Paragraph(meta_text, cell_text), img_flowable]], colWidths=[310, 230])
@@ -204,7 +234,7 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
         [Paragraph("Mandatory Declaration", cell_bold), Paragraph("Extracted Value", cell_bold), Paragraph("Compliance Status", cell_bold)]
     ]
 
-    is_food = any(k in prod_category.lower() for k in ["food", "beverage", "grocery", "edible", "snack", "drink"])
+    is_food = any(k in prod_category.lower() for k in ["food", "beverage", "grocery", "edible", "snack", "drink", "glucose"])
     is_perishable = is_food or any(k in prod_category.lower() for k in ["cosmetic", "medicine", "pharmaceutical", "supplement"])
 
     fields_to_check = [
