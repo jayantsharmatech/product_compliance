@@ -3,6 +3,7 @@ import sys
 import io
 import json
 import base64
+import re
 import logging
 from pathlib import Path
 from datetime import datetime
@@ -89,7 +90,7 @@ def upload_to_s3(file_bytes: bytes, object_name: str, content_type: str = "image
     return f"data:{content_type};base64,{encoded}"
 
 # ------------------------------------------------------------------------------
-# 3. Gemini Multi-Model Fallback Extraction Engine
+# 3. Gemini Multi-Model Fallback Extraction Engine & Dynamic Inference
 # ------------------------------------------------------------------------------
 def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     """
@@ -116,7 +117,7 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
       "net_quantity": "Exact net quantity with units (e.g., 500 g, 1 L, 10 count) or NOT_FOUND",
       "mrp": "Maximum Retail Price inclusive of all taxes with currency (e.g., ₹150 or INR 150) or NOT_FOUND",
       "manufacturer_details": "Complete name and address of the manufacturer, packer, or importer or NOT_FOUND",
-      "country_of_origin": "Country of origin or manufacture or NOT_FOUND",
+      "country_of_origin": "Explicitly stated country of origin or manufacture on the label, or extract the country implied by the manufacturer's address or NOT_FOUND",
       "common_generic_name": "Generic or common name of the commodity or NOT_FOUND",
       "consumer_care_details": "Customer care email, phone, or address or NOT_FOUND",
       "fssai_license_no": "FSSAI license number if food item, otherwise NOT_FOUND",
@@ -171,6 +172,39 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
         "mfg_date": "NOT_FOUND",
         "expiry_date": "NOT_FOUND"
     }
+
+def infer_country_of_origin(extracted_data: dict) -> str:
+    """
+    Dynamically extracts/infers the country of origin from the manufacturer address 
+    or packaging text using regex pattern matching without hardcoded city names.
+    """
+    existing_origin = extracted_data.get("country_of_origin", "NOT_FOUND")
+    if existing_origin and existing_origin != "NOT_FOUND" and existing_origin.lower() != "n/a":
+        return existing_origin
+
+    mfg_details = str(extracted_data.get("manufacturer_details", ""))
+    if not mfg_details or mfg_details == "NOT_FOUND":
+        return "NOT_FOUND"
+
+    mfg_lower = mfg_details.lower()
+
+    # Match explicit country mentions in address strings
+    country_match = re.search(r'\b(?:made in|country of origin|marketed by|imported by)[:\s]*([a-zA-Z\s]{3,20})', mfg_lower)
+    if country_match:
+        found_country = country_match.group(1).strip().title()
+        if len(found_country) > 2:
+            return found_country
+
+    # Dynamic Indian Postal Index Number (PIN) check (6 digits starting with 1-8)
+    has_indian_pincode = bool(re.search(r'\b[1-8][0-9]{5}\b', mfg_details))
+    
+    # Dynamic domestic corporate/entity marker check
+    has_domestic_keyword = bool(re.search(r'\b(india|bharat|pvt\.? ltd\.?|ltd\.?|llp|inc\.?)\b', mfg_lower))
+
+    if has_indian_pincode or has_domestic_keyword:
+        return "India"
+
+    return "NOT_FOUND"
 
 # ------------------------------------------------------------------------------
 # 4. Rule Engine for Legal Metrology (PC) Rules, 2011 & FSSAI Act, 2006
@@ -385,7 +419,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.3.0",
+    version="3.5.0",
     lifespan=lifespan
 )
 
@@ -451,6 +485,11 @@ async def scan_single_image(
         image_url = upload_to_s3(file_bytes, f"scans/{scan_id}.jpg")
 
         extracted_data = extract_label_with_gemini_fallbacks([file_bytes])
+        
+        # SMART DYNAMIC AUTO-INFERENCE: Infer country of origin from address/pincode patterns
+        if extracted_data.get("country_of_origin", "NOT_FOUND") == "NOT_FOUND":
+            extracted_data["country_of_origin"] = infer_country_of_origin(extracted_data)
+
         eval_res = evaluate_compliance(extracted_data)
 
         mrp_val = extracted_data.get("mrp", "NOT_FOUND")
@@ -526,6 +565,11 @@ async def scan_multiple_images(
             image_urls.append(url)
 
         extracted_data = extract_label_with_gemini_fallbacks(image_bytes_list)
+        
+        # SMART DYNAMIC AUTO-INFERENCE: Infer country of origin from address/pincode patterns
+        if extracted_data.get("country_of_origin", "NOT_FOUND") == "NOT_FOUND":
+            extracted_data["country_of_origin"] = infer_country_of_origin(extracted_data)
+
         eval_res = evaluate_compliance(extracted_data)
 
         mrp_val = extracted_data.get("mrp", "NOT_FOUND")
