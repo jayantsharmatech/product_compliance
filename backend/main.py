@@ -102,6 +102,9 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     detailed_prompt = """
     You are an expert Legal Metrology Inspector and OCR Compliance Assistant for packaged commodities under Indian law.
     Analyze the provided product label image(s) meticulously. Extract the exact compliance attributes and their normalized spatial bounding boxes [ymin, xmin, ymax, xmax] on a 0-1000 scale.
+    
+    CRITICAL INSTRUCTION FOR DATES: Look very closely at rows labeled "MFG. DATE:", "PKD.", "BBD", "USE BY:", or "EXPIRY DATE:". Extract these date values (e.g., MM/YYYY or DD/MM/YY) precisely. Do not return "NOT_FOUND" for mfg_date or expiry_date if they are visible anywhere on the label.
+
     Output strictly as a valid JSON object matching the schema below without markdown wrappers or extra commentary.
 
     Required JSON Schema:
@@ -120,8 +123,10 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
       "expiry_date": {"value": "...", "box_2d": [ymin, xmin, ymax, xmax], "found": true}
     }
 
-    If a specific attribute cannot be found on the label, assign "value": "NOT_FOUND", "found": false, and "box_2d": [0,0,0,0].
+    If a specific attribute cannot be found on the label after careful inspection, assign "value": "NOT_FOUND", "found": false, and "box_2d": [0,0,0,0].
     """
+    
+    # (Rest of function remains unchanged)
 
     contents = []
     for b in image_bytes_list:
