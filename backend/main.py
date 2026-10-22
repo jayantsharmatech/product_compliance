@@ -89,12 +89,12 @@ def upload_to_s3(file_bytes: bytes, object_name: str, content_type: str = "image
     return f"data:{content_type};base64,{encoded}"
 
 # ------------------------------------------------------------------------------
-# 3. Gemini Multi-Model Fallback Extraction Engine
+# 3. Gemini Multi-Model Fallback Extraction Engine (Flattened Schema)
 # ------------------------------------------------------------------------------
 def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     """
     Extracts product label details for Legal Metrology compliance using an 
-    ordered fallback array of current Gemini models to prevent traffic bottlenecks.
+    ordered fallback array with a flat JSON schema matching frontend UI expectations.
     """
     fallback_models = [
         "gemini-3.8-flash",       # Primary flagship flash model
@@ -106,25 +106,23 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
     detailed_prompt = """
     You are an expert Legal Metrology Inspector and OCR Compliance Assistant for packaged commodities under Indian law.
     Analyze the provided product label image(s) meticulously. Extract the exact compliance attributes 
-    and output them strictly as a valid JSON object matching the exact schema below without markdown wrappers or extra commentary.
+    and output them strictly as a valid flat JSON object matching the schema below without markdown wrappers or extra commentary.
 
     Required JSON Schema:
     {
       "product_name": "Full commercial name of the product",
       "brand_name": "Brand name or manufacturer label prefix",
       "product_category": "Category of the packaged item (e.g., food, beverage, cosmetics, electronics, general)",
-      "declarations": {
-        "manufacturer_details": {"present": true/false, "value": "Name and address of manufacturer/packer"},
-        "country_of_origin": {"present": true/false, "value": "Country name"},
-        "common_generic_name": {"present": true/false, "value": "Generic name"},
-        "net_quantity": {"present": true/false, "value": "Quantity with units"},
-        "mrp": {"present": true/false, "value": "MRP value with currency symbol"},
-        "consumer_care_details": {"present": true/false, "value": "Contact details"},
-        "fssai_license_no": {"present": true/false, "value": "FSSAI number if food item"}
-      }
+      "net_quantity": "Exact net quantity with units (e.g., 500 g, 1 L) or NOT_FOUND",
+      "mrp": "Maximum Retail Price inclusive of all taxes with currency (e.g., ₹150 or INR 150) or NOT_FOUND",
+      "manufacturer_details": "Complete name and address of the manufacturer, packer, or importer or NOT_FOUND",
+      "country_of_origin": "Country of origin or manufacture or NOT_FOUND",
+      "common_generic_name": "Generic or common name of the commodity or NOT_FOUND",
+      "consumer_care_details": "Customer care email, phone, or address or NOT_FOUND",
+      "fssai_license_no": "FSSAI license number if food item, otherwise NOT_FOUND"
     }
 
-    If a specific declaration or attribute cannot be found, mark "present" as false and set "value" to "NOT_FOUND".
+    If a specific attribute cannot be found on the label, assign its value strictly as "NOT_FOUND".
     """
 
     contents = []
@@ -149,8 +147,7 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
             
             if response and response.text:
                 logger.info(f"[Gemini Extraction] Successfully processed using {model_name}")
-                parsed_json = json.loads(response.text)
-                return parsed_json
+                return json.loads(response.text)
                 
         except Exception as e:
             last_exception = e
@@ -158,19 +155,17 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
             continue
 
     logger.error(f"All Gemini fallback models exhausted. Error: {str(last_exception)}")
-    # Return a safe fallback structure if all models fail
     return {
         "product_name": "Extraction Error Product",
         "brand_name": "Generic",
         "product_category": "general",
-        "declarations": {
-            "manufacturer_details": {"present": False, "value": "NOT_FOUND"},
-            "country_of_origin": {"present": False, "value": "NOT_FOUND"},
-            "common_generic_name": {"present": False, "value": "NOT_FOUND"},
-            "net_quantity": {"present": False, "value": "NOT_FOUND"},
-            "mrp": {"present": False, "value": "NOT_FOUND"},
-            "consumer_care_details": {"present": False, "value": "NOT_FOUND"}
-        }
+        "net_quantity": "NOT_FOUND",
+        "mrp": "NOT_FOUND",
+        "manufacturer_details": "NOT_FOUND",
+        "country_of_origin": "NOT_FOUND",
+        "common_generic_name": "NOT_FOUND",
+        "consumer_care_details": "NOT_FOUND",
+        "fssai_license_no": "NOT_FOUND"
     }
 
 # ------------------------------------------------------------------------------
@@ -192,11 +187,11 @@ def evaluate_compliance(extracted_data: dict) -> dict:
     category = (extracted_data.get("product_category") or "general").lower()
     is_food = "food" in category or "beverage" in category or "grocery" in category
 
-    declarations = extracted_data.get("declarations", {})
-
     for field, weight in MANDATORY_DECLARATION_WEIGHTS.items():
-        present = declarations.get(field, {}).get("present", False)
-        if not present:
+        val = extracted_data.get(field, "NOT_FOUND")
+        is_present = val and val != "NOT_FOUND" and val != "null"
+        
+        if not is_present:
             score -= weight
             violations.append({
                 "field": field,
@@ -207,8 +202,8 @@ def evaluate_compliance(extracted_data: dict) -> dict:
             })
 
     if is_food:
-        fssai_no = declarations.get("fssai_license_no", {}).get("present", False)
-        if not fssai_no:
+        fssai_val = extracted_data.get("fssai_license_no", "NOT_FOUND")
+        if not fssai_val or fssai_val == "NOT_FOUND":
             score -= 10.0
             violations.append({
                 "field": "fssai_license_no",
@@ -324,7 +319,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.0.0",
+    version="3.1.0",
     lifespan=lifespan
 )
 
@@ -389,7 +384,7 @@ async def scan_single_image(
         scan_id = f"scan_{int(datetime.now().timestamp() * 1000)}"
         image_url = upload_to_s3(file_bytes, f"scans/{scan_id}.jpg")
 
-        # Uses Gemini Multi-Model Fallback Chain
+        # Uses Gemini Multi-Model Fallback Chain with Flat Schema
         extracted_data = extract_label_with_gemini_fallbacks([file_bytes])
         eval_res = evaluate_compliance(extracted_data)
 
@@ -399,7 +394,13 @@ async def scan_single_image(
             "product_name": extracted_data.get("product_name", "Packaged Good"),
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
-            "declarations": extracted_data.get("declarations", {}),
+            "net_quantity": extracted_data.get("net_quantity", "NOT_FOUND"),
+            "mrp": extracted_data.get("mrp", "NOT_FOUND"),
+            "manufacturer_details": extracted_data.get("manufacturer_details", "NOT_FOUND"),
+            "country_of_origin": extracted_data.get("country_of_origin", "NOT_FOUND"),
+            "common_generic_name": extracted_data.get("common_generic_name", "NOT_FOUND"),
+            "consumer_care_details": extracted_data.get("consumer_care_details", "NOT_FOUND"),
+            "fssai_license_no": extracted_data.get("fssai_license_no", "NOT_FOUND"),
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],
             "violations": eval_res["violations"],
@@ -434,7 +435,7 @@ async def scan_multiple_images(
             url = upload_to_s3(b, f"scans/{scan_id}_{idx}.jpg")
             image_urls.append(url)
 
-        # Uses Gemini Multi-Model Fallback Chain
+        # Uses Gemini Multi-Model Fallback Chain with Flat Schema
         extracted_data = extract_label_with_gemini_fallbacks(image_bytes_list)
         eval_res = evaluate_compliance(extracted_data)
 
@@ -444,7 +445,13 @@ async def scan_multiple_images(
             "product_name": extracted_data.get("product_name", "Packaged Good"),
             "brand_name": extracted_data.get("brand_name", "Generic"),
             "product_category": extracted_data.get("product_category", "general"),
-            "declarations": extracted_data.get("declarations", {}),
+            "net_quantity": extracted_data.get("net_quantity", "NOT_FOUND"),
+            "mrp": extracted_data.get("mrp", "NOT_FOUND"),
+            "manufacturer_details": extracted_data.get("manufacturer_details", "NOT_FOUND"),
+            "country_of_origin": extracted_data.get("country_of_origin", "NOT_FOUND"),
+            "common_generic_name": extracted_data.get("common_generic_name", "NOT_FOUND"),
+            "consumer_care_details": extracted_data.get("consumer_care_details", "NOT_FOUND"),
+            "fssai_license_no": extracted_data.get("fssai_license_no", "NOT_FOUND"),
             "compliance_score": eval_res["compliance_score"],
             "is_compliant": eval_res["is_compliant"],
             "violations": eval_res["violations"],
