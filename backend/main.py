@@ -32,6 +32,7 @@ from database import (
     get_pending_scans,
     mark_scan_synced,
 )
+from pdf_generator import generate_compliance_pdf
 
 # Optional / External Service Imports with Resilient Fallbacks
 try:
@@ -39,15 +40,6 @@ try:
     AWS_AVAILABLE = True
 except ImportError:
     AWS_AVAILABLE = False
-
-try:
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
-    REPORTLAB_AVAILABLE = True
-except ImportError:
-    REPORTLAB_AVAILABLE = False
 
 logger = logging.getLogger("uvicorn")
 
@@ -125,8 +117,6 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
 
     If a specific attribute cannot be found on the label after careful inspection, assign "value": "NOT_FOUND", "found": false, and "box_2d": [0,0,0,0].
     """
-    
-    # (Rest of function remains unchanged)
 
     contents = []
     for b in image_bytes_list:
@@ -246,10 +236,10 @@ def evaluate_compliance(extracted_data: dict) -> dict:
             score -= 10.0
             violations.append({
                 "field": "expiry_date",
-                "rule": "Legal Metrology (Packaged Commodities) Rules, 2011 - Best Before / Expiry Date",
+                "rule": "Legal Metrology Rules, 2011 - Expiry Date",
                 "penalty_clause": "Section 36(1) Legal Metrology Act, 2009",
                 "max_fine": 3000,
-                "description": "Mandatory Best Before / Expiry date missing on consumable/perishable item"
+                "description": "Mandatory Best Before / Expiry date missing"
             })
 
     score = max(0.0, min(100.0, score))
@@ -267,169 +257,7 @@ def evaluate_compliance(extracted_data: dict) -> dict:
     }
 
 # ------------------------------------------------------------------------------
-# 5. ReportLab PDF Inspection Challan Generator (Category-Adjusted)
-# ------------------------------------------------------------------------------
-def generate_pdf_report(scan_data: dict) -> bytes:
-    if not REPORTLAB_AVAILABLE:
-        return b"%PDF-1.4 Mock Report - ReportLab not installed"
-
-    buffer = io.BytesIO()
-    try:
-        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
-        story = []
-        styles = getSampleStyleSheet()
-
-        title_style = ParagraphStyle(
-            'DocTitle',
-            parent=styles['Heading1'],
-            fontSize=16,
-            leading=20,
-            textColor=colors.HexColor("#1E3A8A"),
-            alignment=1
-        )
-
-        subtitle_style = ParagraphStyle(
-            'DocSubTitle',
-            parent=styles['Normal'],
-            fontSize=9,
-            leading=12,
-            textColor=colors.HexColor("#4B5563"),
-            alignment=1
-        )
-
-        story.append(Paragraph("LEGAL METROLOGY COMPLIANCE INSPECTION REPORT", title_style))
-        story.append(Paragraph("Issued under Legal Metrology (Packaged Commodities) Rules, 2011 & Act, 2009 | Govt. of India", subtitle_style))
-        story.append(Spacer(1, 10))
-
-        scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
-        timestamp = scan_data.get("timestamp") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        score = scan_data.get("compliance_score", 0)
-        is_compliant = scan_data.get("is_compliant", True)
-        status_text = "FULLY COMPLIANT" if is_compliant else "NON_COMPLIANT"
-        status_color = colors.HexColor("#15803D") if is_compliant else colors.HexColor("#B91C1C")
-
-        ext = scan_data.get("extracted_data", {})
-        def get_val(key):
-            item = ext.get(key, scan_data.get(key, "NOT_FOUND"))
-            if isinstance(item, dict):
-                return item.get("value", "NOT_FOUND")
-            return item
-
-        info_data = [
-            [Paragraph("<b>Audit Reference ID:</b>", styles['Normal']), Paragraph(str(scan_id), styles['Normal']), Paragraph("<b>Date & Time:</b>", styles['Normal']), Paragraph(str(timestamp), styles['Normal'])],
-            [Paragraph("<b>Product Name:</b>", styles['Normal']), Paragraph(str(get_val("product_name")), styles['Normal']), Paragraph("<b>Product Category:</b>", styles['Normal']), Paragraph(str(get_val("product_category")), styles['Normal'])],
-            [Paragraph("<b>Inspection Location:</b>", styles['Normal']), Paragraph(str(scan_data.get("location_name", "N/A")), styles['Normal']), Paragraph("<b>Compliance Score:</b>", styles['Normal']), Paragraph(f"{score}%", styles['Normal'])],
-            [Paragraph("<b>Inspection Status:</b>", styles['Normal']), Paragraph(f"<b>{status_text}</b>", ParagraphStyle('St', parent=styles['Normal'], textColor=status_color)), Paragraph("", styles['Normal']), Paragraph("", styles['Normal'])]
-        ]
-
-        t = Table(info_data, colWidths=[110, 160, 110, 160])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,-1), colors.HexColor("#F8FAFC")),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ]))
-        story.append(t)
-        story.append(Spacer(1, 12))
-
-        violations = scan_data.get("violations", [])
-        if violations:
-            story.append(Paragraph("<b>IDENTIFIED COMPLIANCE VIOLATIONS & DEFECTS</b>", styles['Heading2']))
-            v_table_data = [[
-                Paragraph("<b>Rule / Statutory Declaration</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white)),
-                Paragraph("<b>Observed Defect</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white)),
-                Paragraph("<b>Fine / Penalty</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white))
-            ]]
-            for v in violations:
-                v_table_data.append([
-                    Paragraph(str(v.get("rule", "")), styles['Normal']),
-                    Paragraph(str(v.get("description", "")), styles['Normal']),
-                    Paragraph(f"Rs. {v.get('max_fine', 0):,}", styles['Normal'])
-                ])
-             
-            v_table = Table(v_table_data, colWidths=[180, 224, 100])
-            v_table.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#EF4444")),
-                ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#FCA5A5")),
-                ('PADDING', (0,0), (-1,-1), 5),
-                ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ]))
-            story.append(v_table)
-            story.append(Spacer(1, 8))
-
-            compounding_fine = scan_data.get("compounding_fine_inr", 5000)
-            fine_text = f"<b>TOTAL COMPOUNDING CHALLAN FINE (Sec. 36(1)):</b> Statutory 1st offense compounding cap applied — Rs. {compounding_fine:,}"
-            story.append(Paragraph(fine_text, ParagraphStyle('Fine', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor("#B91C1C"))))
-            story.append(Spacer(1, 10))
-
-        story.append(Paragraph("<b>STATUTORY DECLARATION DETAILS</b>", styles['Heading2']))
-        decl_headers = [
-            Paragraph("<b>Mandatory Declaration</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold')),
-            Paragraph("<b>Extracted Value</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold')),
-            Paragraph("<b>Compliance Status</b>", ParagraphStyle('H', parent=styles['Normal'], textColor=colors.white, fontName='Helvetica-Bold'))
-        ]
-        decl_rows = [decl_headers]
-         
-        category = str(get_val("product_category")).lower()
-        is_food = any(k in category for k in ["food", "beverage", "grocery", "edible", "snack", "drink"])
-        is_perishable_or_consumable = is_food or any(k in category for k in ["cosmetic", "medicine", "pharmaceutical", "supplement"])
-
-        fields_to_show = [
-            ("MRP", get_val("mrp")),
-            ("Net Quantity", get_val("net_quantity")),
-            ("Manufacturer Details", get_val("manufacturer_details")),
-            ("Consumer Care Details", get_val("consumer_care_details")),
-            ("Country Of Origin", get_val("country_of_origin")),
-            ("Common/Generic Name", get_val("common_generic_name")),
-        ]
-
-        if is_food:
-            fields_to_show.append(("FSSAI License No", get_val("fssai_license_no")))
-        else:
-            fields_to_show.append(("FSSAI License No", "N/A (Exempted - Non-Food)"))
-
-        fields_to_show.append(("Mfg Date", get_val("mfg_date")))
-
-        if is_perishable_or_consumable:
-            fields_to_show.append(("Expiry Date", get_val("expiry_date")))
-        else:
-            fields_to_show.append(("Expiry Date", "N/A (Exempted - Non-Perishable)"))
-
-        for label, val in fields_to_show:
-            val_str = str(val)
-            if "Exempted" in val_str:
-                stat = "EXEMPTED"
-            else:
-                is_found = val_str and val_str != "NOT_FOUND" and val_str != "null"
-                stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
-             
-            cleaned_val = val_str.replace('₹', 'Rs. ')
-            decl_rows.append([
-                Paragraph(str(label), styles['Normal']),
-                Paragraph(cleaned_val, styles['Normal']),
-                Paragraph(stat, styles['Normal'])
-            ])
-
-        d_table = Table(decl_rows, colWidths=[130, 270, 100])
-        d_table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#1E3A8A")),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor("#CBD5E1")),
-            ('PADDING', (0,0), (-1,-1), 5),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-        ]))
-        story.append(d_table)
-
-        doc.build(story)
-    except Exception as e:
-        logger.error(f"PDF Generation Fallback Triggered: {e}")
-
-    buffer.seek(0)
-    return buffer.getvalue()
-
-# ------------------------------------------------------------------------------
-# 6. FastAPI Lifespan & Application Setup
+# 5. FastAPI Lifespan & Application Setup
 # ------------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -455,7 +283,7 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------------------------
-# 7. Core API Endpoints
+# 6. Core API Endpoints
 # ------------------------------------------------------------------------------
 @app.get("/health")
 async def health_check():
@@ -646,7 +474,7 @@ async def get_report_pdf(scan_id: str):
                 "location_name": "Verified Location"
             }
 
-        pdf_bytes = generate_pdf_report(target)
+        pdf_bytes = generate_compliance_pdf(target)
 
         return Response(
             content=pdf_bytes,
@@ -655,7 +483,7 @@ async def get_report_pdf(scan_id: str):
         )
     except Exception as e:
         logger.error(f"PDF Report Generation Error for {scan_id}: {e}")
-        fallback_pdf = generate_pdf_report({
+        fallback_pdf = generate_compliance_pdf({
             "scan_id": scan_id,
             "product_name": "Emergency Inspection Report",
             "compliance_score": 100.0,
