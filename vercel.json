@@ -15,7 +15,7 @@
   ],
   "routes": [
     {
-      "src": "/(scan|scan-multi|history|dashboard|report|api|health|complaints|sync)(.*)",
+      "src": "/(scan|scan-multi|scan_|history|dashboard|report|api|health|complaints|sync)(.*)",
       "dest": "backend/main.py"
     },
     {
