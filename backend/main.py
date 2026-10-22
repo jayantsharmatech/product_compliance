@@ -128,7 +128,6 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
         contents.append(types.Part.from_bytes(data=b, mime_type="image/jpeg"))
     contents.append(detailed_prompt)
 
-    last_exception = None
     for model_name in fallback_models:
         try:
             response = gemini_client.models.generate_content(
@@ -142,7 +141,6 @@ def extract_label_with_gemini_fallbacks(image_bytes_list: List[bytes]) -> dict:
             if response and response.text:
                 return json.loads(response.text)
         except Exception as e:
-            last_exception = e
             continue
 
     return {
@@ -384,23 +382,24 @@ def generate_pdf_report(scan_data: dict) -> bytes:
         if is_food:
             fields_to_show.append(("FSSAI License No", get_val("fssai_license_no")))
         else:
-            fields_to_show.append(("FSSAI License No", "N/A (Exempted (Non-Food))"))
+            fields_to_show.append(("FSSAI License No", "N/A (Exempted - Non-Food)"))
 
         fields_to_show.append(("Mfg Date", get_val("mfg_date")))
 
         if is_perishable_or_consumable:
             fields_to_show.append(("Expiry Date", get_val("expiry_date")))
         else:
-            fields_to_show.append(("Expiry Date", "N/A (Exempted (Non-Perishable))"))
+            fields_to_show.append(("Expiry Date", "N/A (Exempted - Non-Perishable)"))
 
         for label, val in fields_to_show:
-            if "Exempted" in str(val):
+            val_str = str(val)
+            if "Exempted" in val_str:
                 stat = "EXEMPTED"
             else:
-                is_found = val and val != "NOT_FOUND" and val != "null"
+                is_found = val_str and val_str != "NOT_FOUND" and val_str != "null"
                 stat = "COMPLIANT" if is_found else "NON-COMPLIANT"
              
-            cleaned_val = str(val).replace('₹', 'Rs. ')
+            cleaned_val = val_str.replace('₹', 'Rs. ')
             decl_rows.append([
                 Paragraph(str(label), styles['Normal']),
                 Paragraph(cleaned_val, styles['Normal']),
@@ -438,7 +437,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Legal Metrology Compliance Enforcement API (Gemini Multi-Model Engine)",
-    version="3.8.0",
+    version="3.9.0",
     lifespan=lifespan
 )
 
