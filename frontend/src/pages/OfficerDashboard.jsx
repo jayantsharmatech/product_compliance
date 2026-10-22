@@ -279,8 +279,11 @@ export default function OfficerDashboard() {
                         {/* Bounding Box Overlays */}
                         {auditResult?.extracted_fields &&
                           Object.entries(auditResult.extracted_fields).map(([key, field]) => {
-                            if (!field?.box_2d || field?.found === false) return null;
-                            const style = getDynamicBoxStyle(field.box_2d);
+                            if (!field || typeof field !== 'object') return null;
+                            const box2d = field.box_2d;
+                            if (!box2d || !Array.isArray(box2d) || box2d.length !== 4 || field.found === false) return null;
+
+                            const style = getDynamicBoxStyle(box2d);
                             if (!style) return null;
 
                             return (

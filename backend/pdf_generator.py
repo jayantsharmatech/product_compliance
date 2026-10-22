@@ -110,7 +110,7 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
     scan_id = scan_data.get("scan_id") or scan_data.get("id") or "N/A"
     timestamp = scan_data.get("timestamp", "N/A")
     compliance_score = scan_data.get("compliance_score", 0)
-    overall_status = scan_data.get("overall_status", "NON_COMPLIANT")
+    overall_status = scan_data.get("overall_status", "NON_COMPLIANT" if scan_data.get("violations") else "COMPLIANT")
     prod_category = scan_data.get("product_category", "General Packaged Commodity")
 
     primary_image_str = resolve_image_input(scan_data)
@@ -123,7 +123,7 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
     <b>Product Name:</b> {scan_data.get('product_name', 'Unknown Commodity')}<br/>
     <b>Product Category:</b> <b>{prod_category}</b><br/><br/>
     <b>Weighted Compliance Score:</b> <font color="{ '#166534' if compliance_score >= 80 else '#991b1b' }"><b>{compliance_score}%</b></font><br/>
-    <b>Status:</b> <font color="{ '#166534' if overall_status == 'COMPLIANT' else '#991b1b' }"><b>{overall_status}</b></font>
+    <b>Status:</b> <font color="{ '#166534' if compliance_score >= 85 and not scan_data.get('violations') else '#991b1b' }"><b>{ 'COMPLIANT' if compliance_score >= 85 and not scan_data.get('violations') else 'NON_COMPLIANT' }</b></font>
     """
 
     meta_table = Table([[Paragraph(meta_text, cell_text), img_flowable]], colWidths=[310, 230])
@@ -137,22 +137,21 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
     story.append(Spacer(1, 10))
 
     # 3. Identified Violations Section
-    rules_results = scan_data.get("rules_results", [])
-    failed_rules = [r for r in rules_results if not r.get("passed", False)]
-    net_fine = scan_data.get("challan_amount") or scan_data.get("estimated_penalty_inr") or 0
-    gross_fine = scan_data.get("gross_penalty_sum") or sum(r.get("fine_amount", 2000) for r in failed_rules)
-    cap_adjustment = scan_data.get("statutory_cap_adjustment") or max(0, gross_fine - net_fine)
+    violations = scan_data.get("violations", [])
+    net_fine = scan_data.get("compounding_fine_inr") or scan_data.get("challan_amount") or 0
+    gross_fine = scan_data.get("total_potential_fine_inr") or sum(v.get("max_fine", 2000) for v in violations)
+    cap_adjustment = max(0, gross_fine - net_fine)
 
     story.append(Paragraph("IDENTIFIED COMPLIANCE VIOLATIONS & DEFECTS", section_heading))
 
-    if failed_rules:
+    if violations:
         issues_table_data = [
             [Paragraph("Rule / Statutory Declaration", cell_bold), Paragraph("Observed Defect", cell_bold), Paragraph("Fine / Penalty", cell_bold)]
         ]
-        for rule in failed_rules:
-            rule_name = rule.get("rule_name", "General Violation").replace("_", " ").title()
-            reason = rule.get("reason", "Statutory requirement missing or incorrect.")
-            fine = rule.get("fine_amount", 2000)
+        for v in violations:
+            rule_name = str(v.get("rule", "General Violation"))
+            reason = str(v.get("description", "Statutory requirement missing."))
+            fine = v.get("max_fine", 2000)
 
             issues_table_data.append([
                 Paragraph(f"<font color='#991b1b'><b>{rule_name}</b></font>", cell_text),
@@ -167,7 +166,7 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
             Paragraph(f"Rs. {gross_fine:,}", cell_bold)
         ])
 
-        # Statutory Capping Discount Row (If Cap Applies)
+        # Statutory Capping Adjustment Row
         if cap_adjustment > 0:
             issues_table_data.append([
                 Paragraph("<b>Statutory Capping Adjustment</b>", cell_bold),
@@ -197,32 +196,44 @@ def generate_compliance_pdf(scan_data: Dict[str, Any]) -> bytes:
 
     story.append(Spacer(1, 10))
 
-    # 4. Statutory Declaration Details Table
+    # 4. Statutory Declaration Details Table (Category-Aware Exemptions)
     story.append(Paragraph("STATUTORY DECLARATION DETAILS", section_heading))
-    extracted = scan_data.get("extracted_fields", {})
+    extracted = scan_data.get("extracted_fields") or scan_data.get("extracted_data", {})
 
     audit_table_data = [
         [Paragraph("Mandatory Declaration", cell_bold), Paragraph("Extracted Value", cell_bold), Paragraph("Compliance Status", cell_bold)]
     ]
 
-    for key, field in extracted.items():
-        if not isinstance(field, dict):
-            continue
-        label = key.replace("_", " ").title()
+    is_food = any(k in prod_category.lower() for k in ["food", "beverage", "grocery", "edible", "snack", "drink"])
+    is_perishable = is_food or any(k in prod_category.lower() for k in ["cosmetic", "medicine", "pharmaceutical", "supplement"])
 
-        val = field.get("value")
-        raw = field.get("raw_text")
-        found = field.get("found", False)
-        is_exempted = field.get("is_exempted", False)
+    fields_to_check = [
+        ("mrp", "MRP"),
+        ("net_quantity", "Net Quantity"),
+        ("manufacturer_details", "Manufacturer Details"),
+        ("consumer_care_details", "Consumer Care Details"),
+        ("country_of_origin", "Country Of Origin"),
+        ("common_generic_name", "Common / Generic Name"),
+        ("fssai_license_no", "FSSAI License No"),
+        ("mfg_date", "Mfg Date"),
+        ("expiry_date", "Expiry Date")
+    ]
 
-        if is_exempted:
-            display_val = f"N/A ({field.get('exemption_reason', 'Not Required')})"
+    for key, label in fields_to_check:
+        field = extracted.get(key, {})
+        val = field.get("value") if isinstance(field, dict) else field
+        
+        # Category exemptions logic
+        if key == "fssai_license_no" and not is_food:
+            display_val = "N/A (Exempted - Non-Food Item)"
+            status_paragraph = Paragraph("EXEMPTED", badge_exempt)
+        elif key == "expiry_date" and not is_perishable:
+            display_val = "N/A (Exempted - Non-Perishable Item)"
             status_paragraph = Paragraph("EXEMPTED", badge_exempt)
         else:
-            display_val = str(val if val is not None and str(val).strip() != "" else (raw or "NOT FOUND"))
-            is_missing = (display_val == "NOT FOUND" or not found)
-            is_compliant = False if is_missing else field.get("is_compliant", True)
-            status_paragraph = Paragraph("COMPLIANT", badge_pass) if is_compliant else Paragraph("NON-COMPLIANT", badge_fail)
+            display_val = str(val if val is not None and str(val).strip() != "" and str(val) != "NOT_FOUND" else "NOT FOUND")
+            is_missing = (display_val == "NOT FOUND")
+            status_paragraph = Paragraph("COMPLIANT", badge_pass) if not is_missing else Paragraph("NON-COMPLIANT", badge_fail)
 
         audit_table_data.append([
             Paragraph(label, cell_text),
